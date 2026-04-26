@@ -39,6 +39,142 @@ MAX_TITLE_LENGTH = 2200
 CHUNK_SOFT_LIMIT = 64 * 1024 * 1024
 MIN_CHUNK_SIZE = 5 * 1024 * 1024
 
+# ── Drive shared library cache ─────────────────────────────────────────────
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
+DRIVE_CACHE_TTL = 600  # seconds — refresh library every 10 min
+
+_drive_cache: dict = {
+    "files": [],
+    "fetched_at": 0,
+    "error": None,
+}
+_drive_access_token: dict = {
+    "token": "",
+    "expires_at": 0,
+}
+
+
+# ── Drive shared library helpers ───────────────────────────────────────────
+
+def get_google_credentials() -> dict:
+    """Read Google admin credentials from env variables."""
+    return {
+        "client_id": os.environ.get("GOOGLE_CLIENT_ID", "").strip(),
+        "client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", "").strip(),
+        "refresh_token": os.environ.get("GOOGLE_REFRESH_TOKEN", "").strip(),
+    }
+
+
+def get_google_access_token() -> str:
+    """Get a fresh Google access token using the stored refresh token."""
+    global _drive_access_token
+    now = int(time.time())
+    if _drive_access_token["token"] and _drive_access_token["expires_at"] > now + 60:
+        return _drive_access_token["token"]
+
+    creds = get_google_credentials()
+    if not all(creds.values()):
+        raise RuntimeError("Faltan credenciales de Google en variables de entorno (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN).")
+
+    payload = http_request_json(
+        GOOGLE_TOKEN_URL,
+        method="POST",
+        form_payload={
+            "client_id": creds["client_id"],
+            "client_secret": creds["client_secret"],
+            "refresh_token": creds["refresh_token"],
+            "grant_type": "refresh_token",
+        },
+    )
+    token = payload.get("access_token", "")
+    expires_in = int(payload.get("expires_in", 3600) or 3600)
+    if not token:
+        raise RuntimeError(f"Google no devolvió access_token: {payload}")
+
+    _drive_access_token = {"token": token, "expires_at": now + expires_in}
+    return token
+
+
+def list_drive_folder(folder_id: str, token: str) -> list[dict]:
+    """Recursively list all images and videos in a Drive folder."""
+    results = []
+    page_token = None
+
+    while True:
+        params: dict = {
+            "q": f"'{folder_id}' in parents and trashed = false",
+            "fields": "nextPageToken,files(id,name,mimeType,size,thumbnailLink,videoMediaMetadata,imageMediaMetadata,modifiedTime)",
+            "pageSize": "200",
+            "supportsAllDrives": "true",
+            "includeItemsFromAllDrives": "true",
+        }
+        if page_token:
+            params["pageToken"] = page_token
+
+        url = f"{GOOGLE_DRIVE_FILES_URL}?{urlencode(params)}"
+        data = http_request_json(url, headers={"Authorization": f"Bearer {token}"})
+        files = data.get("files", [])
+
+        for f in files:
+            mime = f.get("mimeType", "")
+            if mime == "application/vnd.google-apps.folder":
+                # Recurse into subfolder
+                results.extend(list_drive_folder(f["id"], token))
+            elif mime.startswith("video/") or mime.startswith("image/"):
+                results.append({
+                    "id": f["id"],
+                    "name": f.get("name", ""),
+                    "mimeType": mime,
+                    "size": int(f.get("size", 0) or 0),
+                    "thumbnailLink": f.get("thumbnailLink", ""),
+                    "modifiedTime": f.get("modifiedTime", ""),
+                    "type": "vid" if mime.startswith("video/") else "img",
+                    "videoMeta": f.get("videoMediaMetadata", {}),
+                    "imageMeta": f.get("imageMediaMetadata", {}),
+                })
+
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
+
+    return results
+
+
+def get_drive_library(force: bool = False) -> dict:
+    """Return cached library, refreshing if stale or forced."""
+    global _drive_cache
+    now = int(time.time())
+
+    if not force and _drive_cache["files"] and (now - _drive_cache["fetched_at"]) < DRIVE_CACHE_TTL:
+        return {"files": _drive_cache["files"], "cached": True, "error": None}
+
+    config = get_public_config()
+    folder_id = config.get("driveFolder", "").strip()
+    if not folder_id:
+        _drive_cache["error"] = "No hay carpeta de Drive configurada."
+        return {"files": [], "cached": False, "error": _drive_cache["error"]}
+
+    # Extract folder ID from URL if needed
+    if "drive.google.com" in folder_id:
+        parts = folder_id.split("/")
+        for i, part in enumerate(parts):
+            if part in ("folders", "d") and i + 1 < len(parts):
+                folder_id = parts[i + 1].split("?")[0]
+                break
+
+    try:
+        token = get_google_access_token()
+        files = list_drive_folder(folder_id, token)
+        _drive_cache = {"files": files, "fetched_at": now, "error": None}
+        return {"files": files, "cached": False, "error": None}
+    except Exception as e:  # noqa: BLE001
+        _drive_cache["error"] = str(e)
+        # Return stale cache if available
+        if _drive_cache["files"]:
+            return {"files": _drive_cache["files"], "cached": True, "error": str(e)}
+        return {"files": [], "cached": False, "error": str(e)}
+
 
 def ensure_files() -> None:
     if not SECRETS_EXAMPLE_PATH.exists():
@@ -560,6 +696,16 @@ class BounceHandler(SimpleHTTPRequestHandler):
             write_json_response(self, {"publicConfig": get_public_config()})
             return
 
+        if parsed.path == "/api/drive/library":
+            force = parse_qs(parsed.query).get("refresh", [""])[0] == "1"
+            result = get_drive_library(force=force)
+            write_json_response(self, result)
+            return
+
+        if parsed.path.startswith("/api/drive/proxy/"):
+            self.handle_drive_proxy(parsed.path)
+            return
+
         if parsed.path == "/api/tiktok/status":
             write_json_response(self, make_tiktok_status(self))
             return
@@ -591,6 +737,28 @@ class BounceHandler(SimpleHTTPRequestHandler):
             return
 
         write_json_response(self, {"error": "Not found"}, HTTPStatus.NOT_FOUND)
+
+    def handle_drive_proxy(self, path: str):
+        """Proxy a Drive file to the client — used for previews without user auth."""
+        file_id = path.removeprefix("/api/drive/proxy/").split("?")[0].strip()
+        if not file_id:
+            write_json_response(self, {"error": "File ID requerido."}, HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            token = get_google_access_token()
+            url = f"{GOOGLE_DRIVE_FILES_URL}/{file_id}?alt=media&supportsAllDrives=true"
+            request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+            with urllib.request.urlopen(request, timeout=60) as resp:
+                content_type = resp.headers.get("Content-Type", "application/octet-stream")
+                data = resp.read()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "private, max-age=300")
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as e:  # noqa: BLE001
+            write_json_response(self, {"error": str(e)}, HTTPStatus.BAD_GATEWAY)
 
     def handle_save_config(self):
         payload = parse_json_body(self)
