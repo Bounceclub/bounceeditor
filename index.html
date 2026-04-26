@@ -85,24 +85,18 @@
       </div>
 
       <div class="button-row">
-        <button id="saveConfigButton" class="button primary">Guardar config compartida</button>
-        <button id="connectButton" class="button secondary">Conectar Google Drive</button>
-        <button id="loadLibraryButton" class="button ghost" disabled>Cargar biblioteca</button>
-        <button id="signOutButton" class="button ghost">Cerrar sesión</button>
-      </div>
-
-      <div class="callout">
-        <strong>Google:</strong> creá un OAuth Client de tipo <em>Web application</em>, activá Drive API y
-        agregá <code>http://localhost:8000</code> para local. Cuando subas la app, cambiás eso por tu dominio HTTPS.
+        <button id="saveConfigButton" class="button primary">Guardar config</button>
+        <button id="loadLibraryButton" class="button secondary">Recargar biblioteca</button>
+        <button id="connectButton" class="button ghost" style="display:none">Conectar Google Drive</button>
+        <button id="signOutButton" class="button ghost" style="display:none">Cerrar sesión</button>
       </div>
 
       <div class="callout soft">
-        <strong>TikTok:</strong> para conectar la cuenta desde esta web vas a necesitar <code>studio-secrets.json</code>
-        con el <code>client key</code>, <code>client secret</code> y un redirect URI HTTPS.
+        <strong>TikTok:</strong> configurá las credenciales en Render para habilitar la publicación directa.
       </div>
 
       <p id="statusMessage" class="status-message">
-        Cargá la configuración compartida, conectate con Google y después elegí la carpeta base de Drive.
+        La biblioteca se carga automáticamente al abrir la app.
       </p>
     </section>
 
