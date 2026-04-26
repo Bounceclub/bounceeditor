@@ -142,7 +142,7 @@ function bindEvents() {
     void runRoulette();
   });
   elements.reloadLibraryButton.addEventListener('click', () => {
-    void loadLibrary();
+    void loadLibrary(true);
   });
   elements.reloadPreviewButton.addEventListener('click', () => {
     const file = getSelectedFile();
@@ -459,53 +459,68 @@ function signOutGoogle() {
   setStatus('Sesión de Google cerrada en este navegador.', 'info');
 }
 
-async function loadLibrary() {
-  if (!state.accessToken) {
-    setStatus('Primero conectate con Google Drive.', 'warn');
-    return;
-  }
-
-  const parsedFolder = parseDriveFolderInput(elements.folderInput.value.trim());
-  if (!parsedFolder.id) {
-    setStatus('Pegá una URL o un ID de carpeta de Google Drive válido.', 'warn');
-    elements.folderInput.focus();
-    return;
-  }
-
+async function loadLibrary(force = false) {
   clearRoulette();
   clearCurrentPreview();
   state.files = [];
   state.filteredFiles = [];
-  state.rootFolder = parsedFolder;
+  state.rootFolder = { id: 'server', name: 'Biblioteca compartida' };
   state.folderCount = 0;
   state.selectedFileId = '';
   renderStats();
   renderLibrary();
   renderSelectedFileMeta(null);
   renderSelectionState();
-  setStatus('Leyendo la carpeta de Drive y sus subcarpetas...', 'info');
+  setStatus('Cargando biblioteca compartida desde el servidor...', 'info');
 
   try {
-    const rootName = await fetchFolderName(parsedFolder);
-    state.rootFolder.name = rootName;
-    const mediaFiles = await crawlDriveTree(parsedFolder, rootName);
-    state.files = mediaFiles;
+    const url = force ? '/api/drive/library?refresh=1' : '/api/drive/library';
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+
+    if (data.error && !data.files?.length) {
+      setStatus(`Error al cargar la biblioteca: ${data.error}`, 'error');
+      return;
+    }
+
+    // Normalize server file format to match existing app format
+    state.files = (data.files || []).map((f) => ({
+      id: f.id,
+      name: f.name,
+      mimeType: f.mimeType,
+      size: f.size || 0,
+      modifiedTime: f.modifiedTime || '',
+      createdTime: f.modifiedTime || '',
+      resourceKey: '',
+      webViewLink: `https://drive.google.com/file/d/${f.id}/view`,
+      width: Number(f.videoMeta?.width || f.imageMeta?.width || 0),
+      height: Number(f.videoMeta?.height || f.imageMeta?.height || 0),
+      durationMs: Number(f.videoMeta?.durationMillis || 0),
+      path: 'Bounce',
+      kind: f.type === 'vid' ? 'video' : 'image',
+    }));
+
     state.files.forEach((file) => {
       file.searchText = `${file.name} ${file.path} ${file.kind}`.toLowerCase();
     });
 
+    state.folderCount = new Set(state.files.map((f) => f.path)).size;
     renderStats();
     applyFiltersAndRender();
+
+    const cached = data.cached ? ' (caché)' : '';
+    const warn = data.error ? ` · ⚠️ ${data.error}` : '';
     setStatus(
-      `Biblioteca cargada: ${state.files.length} assets · ${state.files.filter((item) => item.kind === 'video').length} videos · ${state.files.filter((item) => item.kind === 'image').length} imágenes.`,
-      'success'
+      `Biblioteca cargada${cached}: ${state.files.length} assets · ${state.files.filter((f) => f.kind === 'video').length} videos · ${state.files.filter((f) => f.kind === 'image').length} imágenes.${warn}`,
+      data.error ? 'warn' : 'success'
     );
 
     if (state.isMobileMode) {
       switchMobilePanel('library');
     }
   } catch (error) {
-    setStatus(`No pude cargar la carpeta: ${humanizeError(error)}`, 'error');
+    setStatus(`No pude cargar la biblioteca: ${humanizeError(error)}`, 'error');
   }
 }
 
@@ -750,10 +765,8 @@ async function loadPreview(file, { force = false } = {}) {
 }
 
 async function fetchDriveBlob(file) {
-  const url = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&supportsAllDrives=true`;
-  const response = await fetchWithAuth(url, {
-    headers: buildResourceKeyHeader(file.id, file.resourceKey),
-  });
+  const url = `/api/drive/proxy/${file.id}`;
+  const response = await fetch(url);
 
   if (!response.ok) {
     throw new Error(`drive-preview-${response.status}`);
