@@ -122,6 +122,8 @@ async function initApp() {
   await loadTikTokStatus();
   applyTikTokQueryState();
   switchMobilePanel(state.mobilePanel, { scroll: false });
+  // Auto-load shared library — no user auth needed
+  void loadLibrary();
 }
 
 function bindEvents() {
@@ -338,7 +340,8 @@ async function checkServerHealth() {
 
 function renderAuthState() {
   const hasClientId = Boolean(elements.clientIdInput.value.trim());
-  elements.loadLibraryButton.disabled = !state.accessToken;
+  // Library button always enabled — loads from server, no user token needed
+  elements.loadLibraryButton.disabled = false;
 
   if (state.accessToken) {
     elements.authPill.textContent = 'Google Drive conectado';
