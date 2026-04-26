@@ -736,67 +736,69 @@ function renderSelectionState() {
 async function loadPreview(file, { force = false } = {}) {
   const token = ++state.currentPreviewToken;
 
-  if (!force && state.currentPreviewBlob && state.currentPreviewFileId === file.id) {
-    showPreview(file, state.currentPreviewBlob);
+  // For videos: reuse if same file and not forced
+  if (!force && state.currentPreviewFileId === file.id && state.currentPreviewUrl) {
+    showPreview(file);
     return;
   }
 
-  setStatus(`Cargando preview de "${file.name}" desde Drive...`, 'info');
+  setStatus(`Cargando preview de "${file.name}"...`, 'info');
   elements.previewPlaceholder.hidden = false;
-  elements.previewPlaceholder.textContent = 'Cargando preview desde Drive...';
+  elements.previewPlaceholder.textContent = 'Cargando...';
 
-  try {
-    const blob = await fetchDriveBlob(file);
-    if (token !== state.currentPreviewToken) {
-      return;
-    }
+  if (token !== state.currentPreviewToken) return;
 
-    state.currentPreviewBlob = blob;
+  // Revoke previous object URL if it was a blob URL (images)
+  if (state.currentPreviewUrl && state.currentPreviewUrl.startsWith('blob:')) {
+    URL.revokeObjectURL(state.currentPreviewUrl);
+  }
+
+  if (file.kind === 'video') {
+    // Videos: stream directly via proxy — no blob download needed
+    state.currentPreviewUrl = `/api/drive/proxy/${file.id}`;
     state.currentPreviewFileId = file.id;
-    showPreview(file, blob);
+    state.currentPreviewBlob = null;
+    showPreview(file);
     setStatus(`Preview listo para "${file.name}".`, 'success');
-  } catch (error) {
-    if (token !== state.currentPreviewToken) {
-      return;
+  } else {
+    // Images: download as blob (small files, no streaming needed)
+    try {
+      const blob = await fetchDriveBlob(file);
+      if (token !== state.currentPreviewToken) return;
+      state.currentPreviewUrl = URL.createObjectURL(blob);
+      state.currentPreviewBlob = blob;
+      state.currentPreviewFileId = file.id;
+      showPreview(file);
+      setStatus(`Preview listo para "${file.name}".`, 'success');
+    } catch (error) {
+      if (token !== state.currentPreviewToken) return;
+      clearCurrentPreview();
+      elements.previewPlaceholder.hidden = false;
+      elements.previewPlaceholder.textContent = 'No pude cargar el preview.';
+      setStatus(`No pude cargar el preview: ${humanizeError(error)}`, 'error');
     }
-
-    clearCurrentPreview();
-    elements.previewPlaceholder.hidden = false;
-    elements.previewPlaceholder.textContent = 'No pude cargar el preview de este archivo.';
-    setStatus(`No pude cargar el preview: ${humanizeError(error)}`, 'error');
   }
 }
 
 async function fetchDriveBlob(file) {
-  const url = `/api/drive/proxy/${file.id}`;
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new Error(`drive-preview-${response.status}`);
-  }
-
+  const response = await fetch(`/api/drive/proxy/${file.id}`);
+  if (!response.ok) throw new Error(`drive-preview-${response.status}`);
   return response.blob();
 }
 
-function showPreview(file, blob) {
-  if (state.currentPreviewUrl) {
-    URL.revokeObjectURL(state.currentPreviewUrl);
-  }
-
-  const objectUrl = URL.createObjectURL(blob);
-  state.currentPreviewUrl = objectUrl;
+function showPreview(file) {
   elements.previewPlaceholder.hidden = true;
 
   if (file.kind === 'image') {
     elements.previewVideo.pause();
     elements.previewVideo.hidden = true;
     elements.previewVideo.removeAttribute('src');
-    elements.previewImage.src = objectUrl;
+    elements.previewImage.src = state.currentPreviewUrl;
     elements.previewImage.hidden = false;
   } else {
     elements.previewImage.hidden = true;
     elements.previewImage.removeAttribute('src');
-    elements.previewVideo.src = objectUrl;
+    elements.previewVideo.src = state.currentPreviewUrl;
     elements.previewVideo.hidden = false;
     elements.previewVideo.load();
   }
