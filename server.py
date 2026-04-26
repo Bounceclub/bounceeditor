@@ -739,24 +739,55 @@ class BounceHandler(SimpleHTTPRequestHandler):
         write_json_response(self, {"error": "Not found"}, HTTPStatus.NOT_FOUND)
 
     def handle_drive_proxy(self, path: str):
-        """Proxy a Drive file to the client — used for previews without user auth."""
+        """Streaming proxy with Range request support — lets browser seek videos without downloading everything."""
         file_id = path.removeprefix("/api/drive/proxy/").split("?")[0].strip()
         if not file_id:
             write_json_response(self, {"error": "File ID requerido."}, HTTPStatus.BAD_REQUEST)
             return
+
+        CHUNK = 256 * 1024  # 256 KB streaming chunks
+
         try:
             token = get_google_access_token()
-            url = f"{GOOGLE_DRIVE_FILES_URL}/{file_id}?alt=media&supportsAllDrives=true"
-            request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
-            with urllib.request.urlopen(request, timeout=60) as resp:
+            drive_url = f"{GOOGLE_DRIVE_FILES_URL}/{file_id}?alt=media&supportsAllDrives=true"
+
+            # Forward Range header from browser if present
+            range_header = self.headers.get("Range", "")
+            upstream_headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
+            if range_header:
+                upstream_headers["Range"] = range_header
+
+            req = urllib.request.Request(drive_url, headers=upstream_headers)
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                status = resp.status
                 content_type = resp.headers.get("Content-Type", "application/octet-stream")
-                data = resp.read()
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "private, max-age=300")
-            self.end_headers()
-            self.wfile.write(data)
+                content_length = resp.headers.get("Content-Length", "")
+                content_range = resp.headers.get("Content-Range", "")
+                accept_ranges = resp.headers.get("Accept-Ranges", "bytes")
+
+                http_status = HTTPStatus.PARTIAL_CONTENT if status == 206 else HTTPStatus.OK
+                self.send_response(http_status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Accept-Ranges", accept_ranges)
+                self.send_header("Cache-Control", "private, max-age=300")
+                if content_length:
+                    self.send_header("Content-Length", content_length)
+                if content_range:
+                    self.send_header("Content-Range", content_range)
+                self.end_headers()
+
+                # Stream in chunks — never buffers the whole file in memory
+                while True:
+                    chunk = resp.read(CHUNK)
+                    if not chunk:
+                        break
+                    try:
+                        self.wfile.write(chunk)
+                    except (BrokenPipeError, ConnectionResetError):
+                        break  # Client disconnected (normal when seeking)
+
+        except urllib.error.HTTPError as e:
+            write_json_response(self, {"error": f"Drive error {e.code}: {e.reason}"}, HTTPStatus.BAD_GATEWAY)
         except Exception as e:  # noqa: BLE001
             write_json_response(self, {"error": str(e)}, HTTPStatus.BAD_GATEWAY)
 
