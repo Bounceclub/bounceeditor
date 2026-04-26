@@ -1,0 +1,135 @@
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel-2: #1f2430;
+  --text: #f3f5f7;
+  --muted: #b4bcc8;
+  --accent: #ff8a3d;
+  --accent-2: #ffd6bf;
+  --border: #2b3240;
+  --shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+
+html {
+  font-size: 16px;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Arial, sans-serif;
+  background:
+    radial-gradient(circle at top, rgba(255, 138, 61, 0.18), transparent 32%),
+    linear-gradient(180deg, #11151c 0%, #0b0d12 100%);
+  color: var(--text);
+  line-height: 1.65;
+}
+
+a {
+  color: var(--accent);
+}
+
+.shell {
+  width: min(920px, calc(100% - 32px));
+  margin: 48px auto;
+}
+
+.card {
+  background: linear-gradient(180deg, rgba(31, 36, 48, 0.96), rgba(23, 26, 33, 0.96));
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 40px;
+  box-shadow: var(--shadow);
+}
+
+.eyebrow {
+  display: inline-block;
+  margin-bottom: 16px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 138, 61, 0.14);
+  color: var(--accent-2);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+h1,
+h2 {
+  line-height: 1.2;
+}
+
+h1 {
+  margin: 0 0 10px;
+  font-size: clamp(2rem, 5vw, 3.2rem);
+}
+
+h2 {
+  margin-top: 34px;
+  font-size: 1.2rem;
+}
+
+p,
+li {
+  color: var(--muted);
+}
+
+ul {
+  padding-left: 20px;
+}
+
+.meta,
+.nav,
+.notice {
+  color: var(--muted);
+}
+
+.meta {
+  margin: 0 0 28px;
+}
+
+.nav {
+  display: flex;
+  gap: 16px;
+  margin-top: 28px;
+  flex-wrap: wrap;
+}
+
+.notice {
+  margin: 24px 0 28px;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 138, 61, 0.35);
+  border-radius: 16px;
+  background: rgba(255, 138, 61, 0.08);
+}
+
+.footer {
+  margin-top: 36px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  font-size: 0.95rem;
+}
+
+code {
+  font-family: Consolas, "Courier New", monospace;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+@media (max-width: 640px) {
+  .shell {
+    width: min(100% - 18px, 920px);
+    margin: 18px auto;
+  }
+
+  .card {
+    padding: 24px 18px;
+    border-radius: 18px;
+  }
+}

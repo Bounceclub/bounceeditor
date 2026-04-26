@@ -1,0 +1,6 @@
+.studio-secrets.json
+.tiktok-token.json
+studio-config.json
+__pycache__/
+*.pyc
+.DS_Store
