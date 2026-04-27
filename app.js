@@ -754,7 +754,21 @@ async function loadPreview(file, { force = false } = {}) {
   }
 
   if (file.kind === 'video') {
-    // Videos: stream directly via proxy — no blob download needed
+    // Videos: check proxy is reachable first (catches ffmpeg missing / unsupported format)
+    try {
+      const check = await fetch(`/api/drive/proxy/${file.id}`, { method: 'HEAD' });
+      if (!check.ok) {
+        const errData = await check.json().catch(() => ({}));
+        throw new Error(errData.error || `proxy-${check.status}`);
+      }
+    } catch (err) {
+      if (token !== state.currentPreviewToken) return;
+      clearCurrentPreview();
+      elements.previewPlaceholder.hidden = false;
+      elements.previewPlaceholder.textContent = `No se puede previsualizar: ${err.message}`;
+      setStatus(`Error al cargar el video: ${err.message}`, 'error');
+      return;
+    }
     state.currentPreviewUrl = `/api/drive/proxy/${file.id}`;
     state.currentPreviewFileId = file.id;
     state.currentPreviewBlob = null;
