@@ -768,6 +768,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                 http_status = HTTPStatus.PARTIAL_CONTENT if status == 206 else HTTPStatus.OK
                 self.send_response(http_status)
                 self.send_header("Content-Type", content_type)
+                self.send_header("Content-Disposition", "inline")
                 self.send_header("Accept-Ranges", accept_ranges)
                 self.send_header("Cache-Control", "private, max-age=300")
                 if content_length:
