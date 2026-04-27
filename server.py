@@ -844,8 +844,8 @@ class BounceHandler(SimpleHTTPRequestHandler):
             with urllib.request.urlopen(req, timeout=120) as resp:
                 status = resp.status
                 content_type = resp.headers.get("Content-Type", "application/octet-stream").split(";")[0].strip()
-                logger.info(f"Drive file content-type: {content_type}, size: {content_length}")
                 content_length = resp.headers.get("Content-Length", "")
+                logger.info(f"Drive file content-type: {content_type}, size: {content_length}")
                 content_range = resp.headers.get("Content-Range", "")
                 accept_ranges = resp.headers.get("Accept-Ranges", "bytes")
 
