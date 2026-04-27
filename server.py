@@ -828,9 +828,9 @@ class BounceHandler(SimpleHTTPRequestHandler):
         file_id = path.removeprefix("/api/drive/proxy/").split("?")[0].strip()
         if not file_id:
             write_json_response(self, {"error": "File ID requerido."}, HTTPStatus.BAD_REQUEST)
-        logger.info(f"Proxy request for file_id: {file_id}")
             return
 
+        logger.info(f"Proxy request for file_id: {file_id}")
         try:
             token = get_google_access_token()
             drive_url = f"{GOOGLE_DRIVE_FILES_URL}/{file_id}?alt=media&supportsAllDrives=true"
