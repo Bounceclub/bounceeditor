@@ -741,6 +741,13 @@ class BounceHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/tiktok/disconnect":
             clear_tiktok_token()
             write_json_response(self, {"ok": True})
+            return
+
+        if parsed.path == "/api/tiktok/post":
+            self.handle_tiktok_post()
+            return
+
+        write_json_response(self, {"error": "Not found"}, HTTPStatus.NOT_FOUND)
 
     def do_HEAD(self):
         """Handle HEAD requests - return headers only, no body.
@@ -804,13 +811,6 @@ class BounceHandler(SimpleHTTPRequestHandler):
         # For other endpoints, return 404 or handle as needed
         self.send_response(HTTPStatus.NOT_FOUND)
         self.end_headers()
-            return
-
-        if parsed.path == "/api/tiktok/post":
-            self.handle_tiktok_post()
-            return
-
-        write_json_response(self, {"error": "Not found"}, HTTPStatus.NOT_FOUND)
 
     def handle_drive_proxy(self, path: str):
         """Streaming proxy with Range support.
