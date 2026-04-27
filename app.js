@@ -870,12 +870,19 @@ async function exportCurrentSelection() {
 }
 
 async function buildExportBlobForCurrentSelection(file) {
-  if (!state.currentPreviewBlob || state.currentPreviewFileId !== file.id) {
-    await loadPreview(file);
-  }
-
-  if (!state.currentPreviewBlob) {
-    throw new Error('No pude conseguir el archivo original para exportar.');
+  // For videos we stream via proxy — no blob needed. For images we need the blob.
+  if (file.kind === 'image') {
+    if (!state.currentPreviewBlob || state.currentPreviewFileId !== file.id) {
+      await loadPreview(file);
+    }
+    if (!state.currentPreviewBlob) {
+      throw new Error('No pude conseguir la imagen para exportar.');
+    }
+  } else {
+    // Video: make sure preview URL is set
+    if (!state.currentPreviewUrl || state.currentPreviewFileId !== file.id) {
+      await loadPreview(file);
+    }
   }
 
   const options = buildRenderOptions(file, elements.overlayTextInput.value.trim());
