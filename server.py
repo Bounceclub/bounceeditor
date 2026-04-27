@@ -1,6 +1,9 @@
 import json
 import os
 import secrets
+import shutil
+import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -739,19 +742,27 @@ class BounceHandler(SimpleHTTPRequestHandler):
         write_json_response(self, {"error": "Not found"}, HTTPStatus.NOT_FOUND)
 
     def handle_drive_proxy(self, path: str):
-        """Streaming proxy with Range request support — lets browser seek videos without downloading everything."""
+        """Streaming proxy with Range support.
+        - MP4/WebM/images: streamed directly with correct headers.
+        - MOV/QuickTime/AVI/MKV: transcoded to MP4 via ffmpeg (if available).
+        - If ffmpeg is missing and format is unsupported, returns a clear error.
+        """
+        CHUNK = 256 * 1024
+        BROWSER_VIDEO_TYPES = {"video/mp4", "video/webm", "video/ogg"}
+        TRANSCODE_TYPES = {
+            "video/quicktime", "video/x-msvideo", "video/x-ms-wmv",
+            "video/x-matroska", "video/x-flv", "video/3gpp", "video/3gpp2",
+        }
+
         file_id = path.removeprefix("/api/drive/proxy/").split("?")[0].strip()
         if not file_id:
             write_json_response(self, {"error": "File ID requerido."}, HTTPStatus.BAD_REQUEST)
             return
 
-        CHUNK = 256 * 1024  # 256 KB streaming chunks
-
         try:
             token = get_google_access_token()
             drive_url = f"{GOOGLE_DRIVE_FILES_URL}/{file_id}?alt=media&supportsAllDrives=true"
 
-            # Forward Range header from browser if present
             range_header = self.headers.get("Range", "")
             upstream_headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
             if range_header:
@@ -760,16 +771,86 @@ class BounceHandler(SimpleHTTPRequestHandler):
             req = urllib.request.Request(drive_url, headers=upstream_headers)
             with urllib.request.urlopen(req, timeout=120) as resp:
                 status = resp.status
-                content_type = resp.headers.get("Content-Type", "application/octet-stream")
+                content_type = resp.headers.get("Content-Type", "application/octet-stream").split(";")[0].strip()
                 content_length = resp.headers.get("Content-Length", "")
                 content_range = resp.headers.get("Content-Range", "")
                 accept_ranges = resp.headers.get("Accept-Ranges", "bytes")
 
+                needs_transcode = content_type in TRANSCODE_TYPES
+                ffmpeg_bin = shutil.which("ffmpeg")
+
+                if needs_transcode and ffmpeg_bin and not range_header:
+                    # ── Transcode path ─────────────────────────────────────
+                    tmp_in = tempfile.NamedTemporaryFile(suffix=".input", delete=False)
+                    tmp_in_path = tmp_in.name
+                    try:
+                        while True:
+                            chunk = resp.read(CHUNK)
+                            if not chunk:
+                                break
+                            tmp_in.write(chunk)
+                        tmp_in.close()
+
+                        tmp_out_path = tmp_in_path + ".mp4"
+                        result = subprocess.run(
+                            [
+                                ffmpeg_bin, "-y", "-i", tmp_in_path,
+                                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                                "-c:a", "aac", "-movflags", "+faststart",
+                                tmp_out_path,
+                            ],
+                            capture_output=True,
+                            timeout=300,
+                        )
+
+                        if result.returncode != 0 or not os.path.exists(tmp_out_path):
+                            write_json_response(
+                                self,
+                                {"error": f"ffmpeg falló: {result.stderr.decode('utf-8', errors='replace')[-400:]}"},
+                                HTTPStatus.INTERNAL_SERVER_ERROR,
+                            )
+                            return
+
+                        out_size = os.path.getsize(tmp_out_path)
+                        self.send_response(HTTPStatus.OK)
+                        self.send_header("Content-Type", "video/mp4")
+                        self.send_header("Content-Disposition", "inline")
+                        self.send_header("Content-Length", str(out_size))
+                        self.send_header("Cache-Control", "private, max-age=600")
+                        self.end_headers()
+
+                        with open(tmp_out_path, "rb") as f:
+                            while True:
+                                chunk = f.read(CHUNK)
+                                if not chunk:
+                                    break
+                                try:
+                                    self.wfile.write(chunk)
+                                except (BrokenPipeError, ConnectionResetError):
+                                    break
+                    finally:
+                        for p in (tmp_in_path, tmp_in_path + ".mp4"):
+                            try:
+                                os.unlink(p)
+                            except OSError:
+                                pass
+                    return
+
+                if needs_transcode and not ffmpeg_bin:
+                    # ffmpeg not installed — tell the client clearly
+                    write_json_response(
+                        self,
+                        {"error": f"El archivo es {content_type} y ffmpeg no está instalado en el servidor. Instalá ffmpeg para convertir MOV/AVI/MKV a MP4."},
+                        HTTPStatus.UNPROCESSABLE_ENTITY,
+                    )
+                    return
+
+                # ── Direct stream path (MP4, WebM, images, etc.) ──────────
                 http_status = HTTPStatus.PARTIAL_CONTENT if status == 206 else HTTPStatus.OK
                 self.send_response(http_status)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Disposition", "inline")
-                self.send_header("Accept-Ranges", accept_ranges)
+                self.send_header("Accept-Ranges", accept_ranges or "bytes")
                 self.send_header("Cache-Control", "private, max-age=300")
                 if content_length:
                     self.send_header("Content-Length", content_length)
@@ -777,7 +858,6 @@ class BounceHandler(SimpleHTTPRequestHandler):
                     self.send_header("Content-Range", content_range)
                 self.end_headers()
 
-                # Stream in chunks — never buffers the whole file in memory
                 while True:
                     chunk = resp.read(CHUNK)
                     if not chunk:
@@ -785,7 +865,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                     try:
                         self.wfile.write(chunk)
                     except (BrokenPipeError, ConnectionResetError):
-                        break  # Client disconnected (normal when seeking)
+                        break
 
         except urllib.error.HTTPError as e:
             write_json_response(self, {"error": f"Drive error {e.code}: {e.reason}"}, HTTPStatus.BAD_GATEWAY)
