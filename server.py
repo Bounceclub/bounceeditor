@@ -777,7 +777,11 @@ class BounceHandler(SimpleHTTPRequestHandler):
                 accept_ranges = resp.headers.get("Accept-Ranges", "bytes")
 
                 needs_transcode = content_type in TRANSCODE_TYPES
-                ffmpeg_bin = shutil.which("ffmpeg")
+                try:
+                    import imageio_ffmpeg
+                    ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
+                except Exception:
+                    ffmpeg_bin = shutil.which("ffmpeg")
 
                 if needs_transcode and ffmpeg_bin and not range_header:
                     # ── Transcode path ─────────────────────────────────────
