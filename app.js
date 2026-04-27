@@ -786,9 +786,8 @@ async function fetchDriveBlob(file) {
 }
 
 function showPreview(file, previewToken) {
-  elements.previewPlaceholder.hidden = true;
-
   if (file.kind === 'image') {
+    elements.previewPlaceholder.hidden = true;
     elements.previewVideo.pause();
     elements.previewVideo.hidden = true;
     elements.previewVideo.removeAttribute('src');
@@ -798,9 +797,15 @@ function showPreview(file, previewToken) {
     elements.previewImage.hidden = true;
     elements.previewImage.removeAttribute('src');
 
-    // Remove old error listener if any
+    // Remove old event listeners if any
     if (elements.previewVideo._errorHandler) {
       elements.previewVideo.removeEventListener('error', elements.previewVideo._errorHandler);
+    }
+    if (elements.previewVideo._loadedMetadataHandler) {
+      elements.previewVideo.removeEventListener('loadedmetadata', elements.previewVideo._loadedMetadataHandler);
+    }
+    if (elements.previewVideo._canPlayHandler) {
+      elements.previewVideo.removeEventListener('canplay', elements.previewVideo._canPlayHandler);
     }
 
     // Listen for load errors (e.g. ffmpeg missing, unsupported format)
@@ -826,6 +831,22 @@ function showPreview(file, previewToken) {
     };
     elements.previewVideo.addEventListener('error', elements.previewVideo._errorHandler, { once: true });
 
+    // Listen for loadedmetadata - hide placeholder when video metadata is loaded
+    elements.previewVideo._loadedMetadataHandler = () => {
+      if (previewToken !== undefined && previewToken !== state.currentPreviewToken) return;
+      console.log('Video loadedmetadata event fired');
+      elements.previewPlaceholder.hidden = true;
+    };
+    elements.previewVideo.addEventListener('loadedmetadata', elements.previewVideo._loadedMetadataHandler, { once: true });
+
+    // Listen for canplay - additional fallback to ensure placeholder is hidden
+    elements.previewVideo._canPlayHandler = () => {
+      if (previewToken !== undefined && previewToken !== state.currentPreviewToken) return;
+      console.log('Video canplay event fired');
+      elements.previewPlaceholder.hidden = true;
+    };
+    elements.previewVideo.addEventListener('canplay', elements.previewVideo._canPlayHandler, { once: true });
+
     elements.previewVideo.src = state.currentPreviewUrl;
     elements.previewVideo.hidden = false;
     elements.previewVideo.load();
@@ -833,7 +854,6 @@ function showPreview(file, previewToken) {
 
   syncOverlayControls();
 }
-
 function clearCurrentPreview() {
   if (state.currentPreviewUrl) {
     URL.revokeObjectURL(state.currentPreviewUrl);

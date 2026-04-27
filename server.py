@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import secrets
 import shutil
@@ -42,6 +43,13 @@ MAX_TITLE_LENGTH = 2200
 CHUNK_SOFT_LIMIT = 64 * 1024 * 1024
 MIN_CHUNK_SIZE = 5 * 1024 * 1024
 
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+)
+logger = logging.getLogger(__name__)
 # ── Drive shared library cache ─────────────────────────────────────────────
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
@@ -733,6 +741,69 @@ class BounceHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/tiktok/disconnect":
             clear_tiktok_token()
             write_json_response(self, {"ok": True})
+
+    def do_HEAD(self):
+        """Handle HEAD requests - return headers only, no body.
+        
+        This is important for video elements that make HEAD requests before
+        loading to check if the resource exists and get metadata.
+        """
+        parsed = urlparse(self.path)
+
+        if parsed.path.startswith("/api/drive/proxy/"):
+            # For proxy requests, we need to get the headers from Drive
+            # but not stream the content
+            file_id = parsed.path.removeprefix("/api/drive/proxy/").split("?")[0].strip()
+            if not file_id:
+                self.send_response(HTTPStatus.BAD_REQUEST)
+                self.end_headers()
+                return
+
+            try:
+                token = get_google_access_token()
+                drive_url = f"{GOOGLE_DRIVE_FILES_URL}/{file_id}?alt=media&supportsAllDrives=true"
+
+                req = urllib.request.Request(drive_url, method="HEAD", headers={"Authorization": f"Bearer {token}"})
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    content_type = resp.headers.get("Content-Type", "application/octet-stream").split(";")[0].strip()
+                    content_length = resp.headers.get("Content-Length", "")
+                    accept_ranges = resp.headers.get("Accept-Ranges", "bytes")
+
+                    # Determine if we need to transcode (MOV to MP4)
+                    TRANSCODE_TYPES = {
+                        "video/quicktime", "video/x-msvideo", "video/x-ms-wmv",
+                        "video/x-matroska", "video/x-flv", "video/3gpp", "video/3gpp2",
+                    }
+                    needs_transcode = content_type in TRANSCODE_TYPES
+
+                    # If transcoding, we return MP4 headers
+                    # Otherwise, return the original content-type
+                    final_content_type = "video/mp4" if needs_transcode else content_type
+
+                    self.send_response(HTTPStatus.OK)
+                    self.send_header("Content-Type", final_content_type)
+                    self.send_header("Content-Disposition", "inline")
+                    self.send_header("Accept-Ranges", accept_ranges or "bytes")
+                    self.send_header("Cache-Control", "private, max-age=300")
+                    if content_length and not needs_transcode:
+                        self.send_header("Content-Length", content_length)
+                    self.end_headers()
+                    return
+
+            except urllib.error.HTTPError as e:
+                logger.error(f"HTTPError in HEAD request for {file_id}: {e.code} - {e.reason}")
+                self.send_response(e.code)
+                self.end_headers()
+                return
+            except Exception as e:
+                logger.error(f"Error in HEAD request for {file_id}: {str(e)}")
+                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
+                self.end_headers()
+                return
+
+        # For other endpoints, return 404 or handle as needed
+        self.send_response(HTTPStatus.NOT_FOUND)
+        self.end_headers()
             return
 
         if parsed.path == "/api/tiktok/post":
@@ -757,6 +828,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
         file_id = path.removeprefix("/api/drive/proxy/").split("?")[0].strip()
         if not file_id:
             write_json_response(self, {"error": "File ID requerido."}, HTTPStatus.BAD_REQUEST)
+        logger.info(f"Proxy request for file_id: {file_id}")
             return
 
         try:
@@ -772,16 +844,19 @@ class BounceHandler(SimpleHTTPRequestHandler):
             with urllib.request.urlopen(req, timeout=120) as resp:
                 status = resp.status
                 content_type = resp.headers.get("Content-Type", "application/octet-stream").split(";")[0].strip()
+                logger.info(f"Drive file content-type: {content_type}, size: {content_length}")
                 content_length = resp.headers.get("Content-Length", "")
                 content_range = resp.headers.get("Content-Range", "")
                 accept_ranges = resp.headers.get("Accept-Ranges", "bytes")
 
                 needs_transcode = content_type in TRANSCODE_TYPES
+                logger.info(f"Needs transcode: {needs_transcode}, content_type in TRANSCODE_TYPES")
                 try:
                     import imageio_ffmpeg
                     ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
                 except Exception:
                     ffmpeg_bin = shutil.which("ffmpeg")
+                    logger.info(f"ffmpeg found: {ffmpeg_bin is not None}")
 
                 if needs_transcode and ffmpeg_bin and not range_header:
                     # ── Transcode path ─────────────────────────────────────
@@ -796,6 +871,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                         tmp_in.close()
 
                         tmp_out_path = tmp_in_path + ".mp4"
+                        logger.info(f"Starting ffmpeg transcode for {file_id}")
                         result = subprocess.run(
                             [
                                 ffmpeg_bin, "-y", "-i", tmp_in_path,
@@ -807,6 +883,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                             timeout=300,
                         )
 
+                        logger.info(f"ffmpeg completed: returncode={result.returncode}, output_exists={os.path.exists(tmp_out_path)}")
                         if result.returncode != 0 or not os.path.exists(tmp_out_path):
                             write_json_response(
                                 self,
@@ -841,6 +918,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                     return
 
                 if needs_transcode and not ffmpeg_bin:
+                    logger.warning(f"ffmpeg not available for {content_type} file")
                     # ffmpeg not installed — tell the client clearly
                     write_json_response(
                         self,
@@ -850,6 +928,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                     return
 
                 # ── Direct stream path (MP4, WebM, images, etc.) ──────────
+                logger.info(f"Direct streaming: {content_type}, status: {status}")
                 http_status = HTTPStatus.PARTIAL_CONTENT if status == 206 else HTTPStatus.OK
                 self.send_response(http_status)
                 self.send_header("Content-Type", content_type)
@@ -872,9 +951,11 @@ class BounceHandler(SimpleHTTPRequestHandler):
                         break
 
         except urllib.error.HTTPError as e:
+            logger.error(f"HTTPError proxying {file_id}: {e.code} - {e.reason}")
             write_json_response(self, {"error": f"Drive error {e.code}: {e.reason}"}, HTTPStatus.BAD_GATEWAY)
         except Exception as e:  # noqa: BLE001
             write_json_response(self, {"error": str(e)}, HTTPStatus.BAD_GATEWAY)
+            logger.error(f"Error proxying {file_id}: {str(e)}")
 
     def handle_save_config(self):
         payload = parse_json_body(self)
