@@ -758,7 +758,6 @@ async function loadPreview(file, { force = false } = {}) {
     state.currentPreviewFileId = file.id;
     state.currentPreviewBlob = null;
     showPreview(file, token);
-    setStatus(`Preview listo para "${file.name}".`, 'success');
   } else {
     // Images: download as blob (small files, no streaming needed)
     try {
@@ -836,6 +835,7 @@ function showPreview(file, previewToken) {
       if (previewToken !== undefined && previewToken !== state.currentPreviewToken) return;
       console.log('Video loadedmetadata event fired');
       elements.previewPlaceholder.hidden = true;
+      setStatus(`Preview listo para "${file.name}".`, 'success');
     };
     elements.previewVideo.addEventListener('loadedmetadata', elements.previewVideo._loadedMetadataHandler, { once: true });
 
@@ -854,6 +854,7 @@ function showPreview(file, previewToken) {
 
   syncOverlayControls();
 }
+
 function clearCurrentPreview() {
   if (state.currentPreviewUrl) {
     URL.revokeObjectURL(state.currentPreviewUrl);
@@ -868,8 +869,9 @@ function clearCurrentPreview() {
   elements.previewVideo.hidden = true;
   elements.previewVideo.removeAttribute('src');
   elements.overlayPreview.hidden = true;
-}
 
+
+}
 function syncOverlayControls() {
   const fontSize = Number(elements.fontSizeInput.value);
   const lineSpacing = Number(elements.lineSpacingInput.value);
