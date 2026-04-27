@@ -754,25 +754,10 @@ async function loadPreview(file, { force = false } = {}) {
   }
 
   if (file.kind === 'video') {
-    // Videos: check proxy is reachable first (catches ffmpeg missing / unsupported format)
-    try {
-      const check = await fetch(`/api/drive/proxy/${file.id}`, { method: 'HEAD' });
-      if (!check.ok) {
-        const errData = await check.json().catch(() => ({}));
-        throw new Error(errData.error || `proxy-${check.status}`);
-      }
-    } catch (err) {
-      if (token !== state.currentPreviewToken) return;
-      clearCurrentPreview();
-      elements.previewPlaceholder.hidden = false;
-      elements.previewPlaceholder.textContent = `No se puede previsualizar: ${err.message}`;
-      setStatus(`Error al cargar el video: ${err.message}`, 'error');
-      return;
-    }
     state.currentPreviewUrl = `/api/drive/proxy/${file.id}`;
     state.currentPreviewFileId = file.id;
     state.currentPreviewBlob = null;
-    showPreview(file);
+    showPreview(file, token);
     setStatus(`Preview listo para "${file.name}".`, 'success');
   } else {
     // Images: download as blob (small files, no streaming needed)
@@ -800,7 +785,7 @@ async function fetchDriveBlob(file) {
   return response.blob();
 }
 
-function showPreview(file) {
+function showPreview(file, previewToken) {
   elements.previewPlaceholder.hidden = true;
 
   if (file.kind === 'image') {
@@ -812,6 +797,35 @@ function showPreview(file) {
   } else {
     elements.previewImage.hidden = true;
     elements.previewImage.removeAttribute('src');
+
+    // Remove old error listener if any
+    if (elements.previewVideo._errorHandler) {
+      elements.previewVideo.removeEventListener('error', elements.previewVideo._errorHandler);
+    }
+
+    // Listen for load errors (e.g. ffmpeg missing, unsupported format)
+    elements.previewVideo._errorHandler = async () => {
+      if (previewToken !== undefined && previewToken !== state.currentPreviewToken) return;
+      // Try to get the actual error from the proxy
+      try {
+        const resp = await fetch(`/api/drive/proxy/${file.id}`);
+        if (!resp.ok) {
+          const data = await resp.json().catch(() => ({}));
+          const msg = data.error || `Error ${resp.status}`;
+          elements.previewPlaceholder.textContent = msg;
+          elements.previewPlaceholder.hidden = false;
+          elements.previewVideo.hidden = true;
+          setStatus(`No se puede reproducir: ${msg}`, 'error');
+          return;
+        }
+      } catch (_) {}
+      elements.previewPlaceholder.textContent = 'Este formato de video no es compatible con el navegador.';
+      elements.previewPlaceholder.hidden = false;
+      elements.previewVideo.hidden = true;
+      setStatus(`No se puede reproducir "${file.name}". Formato no soportado.`, 'error');
+    };
+    elements.previewVideo.addEventListener('error', elements.previewVideo._errorHandler, { once: true });
+
     elements.previewVideo.src = state.currentPreviewUrl;
     elements.previewVideo.hidden = false;
     elements.previewVideo.load();
