@@ -1,1 +1,1 @@
-# No external dependencies — server.py uses Python stdlib only
+imageio-ffmpeg>=0.5.1
