@@ -733,7 +733,7 @@ function renderSelectedFileMeta(file) {
 function renderSelectionState() {
   const file = getSelectedFile();
   elements.exportButton.disabled = !file;
-  elements.exportButton.textContent = file?.kind === 'video' ? 'Exportar WEBM' : file ? 'Exportar PNG' : 'Exportar';
+  elements.exportButton.textContent = file?.kind === 'video' ? 'Exportar MP4' : file ? 'Exportar PNG' : 'Exportar';
   elements.tiktokModeBadge.textContent = file ? (file.kind === 'video' ? 'Video listo' : 'Imagen elegida') : 'Video only';
   syncTikTokPublishAvailability();
   syncOverlayControls();
@@ -791,14 +791,18 @@ async function fetchDriveBlob(file) {
 }
 
 function showPreview(file, previewToken) {
+  console.log("[PREVIEW] showPreview called for:", file.name, "kind:", file.kind, "url:", state.currentPreviewUrl);
   if (file.kind === 'image') {
+    console.log("[PREVIEW] Showing image preview");
     elements.previewPlaceholder.hidden = true;
     elements.previewVideo.pause();
     elements.previewVideo.hidden = true;
     elements.previewVideo.removeAttribute('src');
     elements.previewImage.src = state.currentPreviewUrl;
     elements.previewImage.hidden = false;
+    console.log("[PREVIEW] Image preview set, hidden:", elements.previewImage.hidden);
   } else {
+    console.log("[PREVIEW] Showing video preview");
     elements.previewImage.hidden = true;
     elements.previewImage.removeAttribute('src');
 
@@ -816,6 +820,7 @@ function showPreview(file, previewToken) {
     // Listen for load errors (e.g. ffmpeg missing, unsupported format)
     elements.previewVideo._errorHandler = async () => {
       if (previewToken !== undefined && previewToken !== state.currentPreviewToken) return;
+      console.error("[PREVIEW] Video error event fired");
       // Try to get the actual error from the proxy
       try {
         const resp = await fetch(`/api/drive/proxy/${file.id}`);
@@ -840,6 +845,7 @@ function showPreview(file, previewToken) {
     elements.previewVideo._loadedMetadataHandler = () => {
       if (previewToken !== undefined && previewToken !== state.currentPreviewToken) return;
       console.log('Video loadedmetadata event fired');
+      console.log("[PREVIEW] Hiding placeholder, showing video");
       elements.previewPlaceholder.hidden = true;
       setStatus(`Preview listo para "${file.name}".`, 'success');
     };
@@ -849,6 +855,7 @@ function showPreview(file, previewToken) {
     elements.previewVideo._canPlayHandler = () => {
       if (previewToken !== undefined && previewToken !== state.currentPreviewToken) return;
       console.log('Video canplay event fired');
+      console.log("[PREVIEW] Ensuring video is visible");
       elements.previewPlaceholder.hidden = true;
     };
     elements.previewVideo.addEventListener('canplay', elements.previewVideo._canPlayHandler, { once: true });
@@ -912,7 +919,7 @@ async function exportCurrentSelection() {
   }
 
   elements.exportButton.disabled = true;
-  elements.exportButton.textContent = file.kind === 'video' ? 'Exportando WEBM...' : 'Exportando PNG...';
+  elements.exportButton.textContent = file.kind === 'video' ? 'Exportando MP4...' : 'Exportando PNG...';
   setStatus(`Procesando "${file.name}" desde el navegador...`, 'info');
 
   try {
@@ -953,7 +960,7 @@ async function buildExportBlobForCurrentSelection(file) {
   return {
     blob,
     filename: buildExportName(file),
-    mimeType: file.kind === 'video' ? 'video/webm' : 'image/png',
+    mimeType: file.kind === 'video' ? 'video/mp4' : 'image/png',
   };
 }
 
@@ -1023,7 +1030,7 @@ function buildExportName(file) {
     .replace(/[^\w\-]+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
-  return `${stem || 'bounce-export'}${file.kind === 'video' ? '.webm' : '.png'}`;
+  return `${stem || 'bounce-export'}${file.kind === 'video' ? '.mp4' : '.png'}`;
 }
 
 async function exportImageClientSide(options) {
@@ -1058,8 +1065,8 @@ async function exportVideoClientSide(options, file) {
   const mimeType = pickRecorderMimeType();
   console.log("[VIDEO_EXPORT] Selected mime type:", mimeType);
   if (!mimeType) {
-    throw new Error('Este navegador no soporta exportación de video en WEBM.');
     console.error("[VIDEO_EXPORT] No supported mime type found");
+    throw new Error('Este navegador no soporta exportación de video en MP4.');
   }
 
   const video = document.createElement('video');
@@ -1149,6 +1156,7 @@ async function waitForVideo(video) {
 
 function pickRecorderMimeType() {
   const candidates = [
+    'video/mp4',
     'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8,opus',
     'video/webm',
