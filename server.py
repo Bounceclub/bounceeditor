@@ -7,7 +7,6 @@ import subprocess
 import tempfile
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from email import policy
 from email.parser import BytesParser
