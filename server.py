@@ -41,6 +41,178 @@ PUBLIC_CONFIG_DEFAULTS = {
 MAX_TITLE_LENGTH = 2200
 CHUNK_SOFT_LIMIT = 64 * 1024 * 1024
 MIN_CHUNK_SIZE = 5 * 1024 * 1024
+FFMPEG_PATH = None
+TEMP_DIR = None
+
+
+def detect_ffmpeg() -> str | None:
+    """Detect if ffmpeg is available and return its path."""
+    global FFMPEG_PATH
+    if FFMPEG_PATH is not None:
+        return FFMPEG_PATH
+
+    # Try to find ffmpeg in common locations
+    ffmpeg_names = ['ffmpeg', 'ffmpeg.exe']
+    common_paths = [
+        r'C:\ffmpeg\ffmpeg.exe',
+        r'C:\Program Files\ffmpeg\bin\ffmpeg.exe',
+        r'C:\Program Files (x86)\ffmpeg\bin\ffmpeg.exe',
+        r'C:\Users\lucas\AppData\Local\Microsoft\WinGet\Packages\yt-dlp.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-N-120858-gae448e00af-win64-gpl\bin\ffmpeg.exe',
+        '/usr/bin/ffmpeg',
+        '/usr/local/bin/ffmpeg',
+        '/opt/homebrew/bin/ffmpeg',
+    ]
+
+    # First try PATH
+    for name in ffmpeg_names:
+        ffmpeg_path = shutil.which(name)
+        if ffmpeg_path:
+            # Test if it actually works
+            try:
+                result = subprocess.run(
+                    [ffmpeg_path, '-version'],
+                    capture_output=True,
+                    timeout=5,
+                    text=True
+                )
+                if result.returncode == 0 and 'ffmpeg' in result.stdout.lower():
+                    FFMPEG_PATH = ffmpeg_path
+                    print(f"[FFMPEG] Found ffmpeg in PATH at: {FFMPEG_PATH}")
+                    return FFMPEG_PATH
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+                print(f"[FFMPEG] Error testing ffmpeg at {ffmpeg_path}: {e}")
+                continue
+
+    # Try common paths
+    for path in common_paths:
+        if Path(path).exists():
+            try:
+                result = subprocess.run(
+                    [path, '-version'],
+                    capture_output=True,
+                    timeout=5,
+                    text=True
+                )
+                if result.returncode == 0 and 'ffmpeg' in result.stdout.lower():
+                    FFMPEG_PATH = path
+                    print(f"[FFMPEG] Found ffmpeg at common path: {FFMPEG_PATH}")
+                    return FFMPEG_PATH
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+                print(f"[FFMPEG] Error testing ffmpeg at {path}: {e}")
+                continue
+
+    print("[FFMPEG] ffmpeg not found in system PATH or common locations")
+    FFMPEG_PATH = None
+    return None
+
+
+def get_temp_dir() -> Path:
+    """Get or create temporary directory for transcoding."""
+    global TEMP_DIR
+    if TEMP_DIR is None:
+        TEMP_DIR = Path(tempfile.mkdtemp(prefix='bounce_transcode_'))
+        print(f"[FFMPEG] Created temp directory: {TEMP_DIR}")
+    return TEMP_DIR
+
+
+def cleanup_temp_dir() -> None:
+    """Clean up temporary directory."""
+    global TEMP_DIR
+    if TEMP_DIR is not None and TEMP_DIR.exists():
+        try:
+            shutil.rmtree(TEMP_DIR)
+            print(f"[FFMPEG] Cleaned up temp directory: {TEMP_DIR}")
+        except Exception as e:
+            print(f"[FFMPEG] Error cleaning up temp directory: {e}")
+        finally:
+            TEMP_DIR = None
+
+
+def transcode_video_to_mp4(input_data: bytes, max_duration: int = 30) -> bytes:
+    """
+    Transcode video to MP4 format using ffmpeg.
+
+    Args:
+        input_data: Input video data as bytes
+        max_duration: Maximum duration in seconds for preview transcoding
+
+    Returns:
+        Transcoded video data as bytes
+
+    Raises:
+        RuntimeError: If ffmpeg is not available or transcoding fails
+    """
+    ffmpeg_path = detect_ffmpeg()
+    if not ffmpeg_path:
+        raise RuntimeError("ffmpeg no está disponible en el servidor")
+
+    temp_dir = get_temp_dir()
+    input_path = temp_dir / f"input_{secrets.token_hex(8)}.mp4"
+    output_path = temp_dir / f"output_{secrets.token_hex(8)}.mp4"
+
+    try:
+        # Write input data to temporary file
+        input_path.write_bytes(input_data)
+        print(f"[FFMPEG] Input file size: {len(input_data)} bytes")
+
+        # Build ffmpeg command for preview transcoding
+        # -t: limit duration for preview
+        # -c:v libx264: video codec
+        # -c:a aac: audio codec
+        # -movflags +faststart: optimize for web streaming
+        # -y: overwrite output file
+        cmd = [
+            ffmpeg_path,
+            '-i', str(input_path),
+            '-t', str(max_duration),
+            '-c:v', 'libx264',
+            '-c:a', 'aac',
+            '-movflags', '+faststart',
+            '-y',
+            str(output_path)
+        ]
+
+        print(f"[FFMPEG] Running transcoding command: {' '.join(cmd)}")
+
+        # Run ffmpeg with timeout
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=120,  # 2 minute timeout
+            text=True
+        )
+
+        if result.returncode != 0:
+            error_msg = result.stderr or result.stdout or "Unknown error"
+            print(f"[FFMPEG] Transcoding failed: {error_msg}")
+            raise RuntimeError(f"Error en ffmpeg: {error_msg}")
+
+        if not output_path.exists():
+            raise RuntimeError("ffmpeg no generó archivo de salida")
+
+        # Read transcoded output
+        output_data = output_path.read_bytes()
+        print(f"[FFMPEG] Output file size: {len(output_data)} bytes")
+
+        if len(output_data) == 0:
+            raise RuntimeError("Archivo de salida vacío después de transcoding")
+
+        return output_data
+
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Transcoding timeout - ffmpeg tomó demasiado tiempo")
+    except Exception as e:
+        print(f"[FFMPEG] Transcoding error: {e}")
+        raise RuntimeError(f"Error durante transcoding: {str(e)}")
+    finally:
+        # Clean up temporary files
+        try:
+            if input_path.exists():
+                input_path.unlink()
+            if output_path.exists():
+                output_path.unlink()
+        except Exception as e:
+            print(f"[FFMPEG] Error cleaning up temp files: {e}")
 
 
 # Configure logging
@@ -736,6 +908,10 @@ class BounceHandler(SimpleHTTPRequestHandler):
             self.handle_tiktok_callback(parsed)
             return
 
+        if parsed.path == "/api/ffmpeg/status":
+            self.handle_ffmpeg_status()
+            return
+
         return super().do_GET()
 
     def do_POST(self):
@@ -752,6 +928,10 @@ class BounceHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/tiktok/post":
             self.handle_tiktok_post()
+            return
+
+        if parsed.path == "/api/transcode/video":
+            self.handle_transcode_video()
             return
 
         write_json_response(self, {"error": "Not found"}, HTTPStatus.NOT_FOUND)
@@ -1120,6 +1300,16 @@ class BounceHandler(SimpleHTTPRequestHandler):
                 cookies=[serialize_cookie("tiktok_oauth_state", "", max_age=0)],
             )
 
+    def handle_ffmpeg_status(self):
+        """Handle ffmpeg status check requests."""
+        ffmpeg_path = detect_ffmpeg()
+        status = {
+            "available": ffmpeg_path is not None,
+            "path": ffmpeg_path or "",
+            "temp_dir": str(TEMP_DIR) if TEMP_DIR else ""
+        }
+        write_json_response(self, status)
+
     def handle_tiktok_post(self):
         runtime = get_tiktok_runtime(self)
         if not runtime["configured"]:
@@ -1173,12 +1363,72 @@ class BounceHandler(SimpleHTTPRequestHandler):
         except Exception as error:  # noqa: BLE001
             write_json_response(self, {"error": str(error)}, HTTPStatus.BAD_REQUEST)
 
+    def handle_transcode_video(self):
+        """Handle video transcoding requests."""
+        content_type = self.headers.get("Content-Type", "")
+        content_length = int(self.headers.get("Content-Length", "0"))
+
+        if content_length == 0:
+            write_json_response(
+                self,
+                {"error": "No se recibieron datos de video"},
+                HTTPStatus.BAD_REQUEST
+            )
+            return
+
+        try:
+            # Read video data
+            video_data = self.rfile.read(content_length)
+            print(f"[TRANSCODE] Received {len(video_data)} bytes for transcoding")
+
+            # Parse max duration from query parameter (default 30 seconds for preview)
+            parsed = urlparse(self.path)
+            query_params = parse_qs(parsed.query)
+            max_duration = int(query_params.get("max_duration", ["30"])[0])
+
+            # Transcode video
+            print(f"[TRANSCODE] Starting transcoding with max_duration={max_duration}")
+            transcoded_data = transcode_video_to_mp4(video_data, max_duration)
+
+            # Send transcoded video back
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", str(len(transcoded_data)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(transcoded_data)
+
+            print(f"[TRANSCODE] Successfully transcoded and sent {len(transcoded_data)} bytes")
+
+        except RuntimeError as error:
+            print(f"[TRANSCODE] RuntimeError: {error}")
+            write_json_response(self, {"error": str(error)}, HTTPStatus.BAD_REQUEST)
+        except Exception as error:
+            print(f"[TRANSCODE] Unexpected error: {error}")
+            write_json_response(self, {"error": f"Error inesperado: {str(error)}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
 
 def main() -> None:
     ensure_files()
+
+    # Cleanup temp directory on exit
+    import atexit
+    atexit.register(cleanup_temp_dir)
+
     server = ThreadingHTTPServer((HOST, PORT), BounceHandler)
     print(f"Bounce Drive Media Studio running on http://{HOST}:{PORT}")
-    server.serve_forever()
+
+    # Check ffmpeg availability on startup
+    ffmpeg_path = detect_ffmpeg()
+    if ffmpeg_path:
+        print(f"[FFMPEG] ffmpeg detected at: {ffmpeg_path}")
+    else:
+        print("[FFMPEG] WARNING: ffmpeg not detected. Video transcoding will not be available.")
+
+    try:
+        server.serve_forever()
+    finally:
+        cleanup_temp_dir()
 
 
 if __name__ == "__main__":

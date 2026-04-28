@@ -756,13 +756,11 @@ async function loadPreview(file, { force = false } = {}) {
 
   if (file.kind === 'video') {
     setStatus(`Transcodificando video "${file.name}"...`, 'info');
-    elements.previewPlaceholder.hidden = false;
-    elements.previewPlaceholder.textContent = 'Transcodificando video... (puede tardar 10-30 segundos)';
   } else {
     setStatus(`Cargando preview de "${file.name}"...`, 'info');
-    elements.previewPlaceholder.hidden = false;
-    elements.previewPlaceholder.textContent = 'Cargando...';
   }
+  elements.previewPlaceholder.hidden = false;
+  elements.previewPlaceholder.textContent = file.kind === 'video' ? 'Transcodificando video... (puede tardar 10-30 segundos)' : 'Cargando...';
 
   if (token !== state.currentPreviewToken) return;
 
