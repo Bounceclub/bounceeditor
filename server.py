@@ -1071,23 +1071,40 @@ class BounceHandler(SimpleHTTPRequestHandler):
                         
                         ffmpeg_cmd = [
                             ffmpeg_bin, "-y", "-i", tmp_in_path,
-                            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
                             "-c:a", "aac", "-movflags", "+faststart",
                         ] + duration_limit + [tmp_out_path]
-                        
+
                         logger.info(f"Running ffmpeg command: {' '.join(ffmpeg_cmd)}")
-                        
+
                         result = subprocess.run(
                             ffmpeg_cmd,
                             capture_output=True,
-                            timeout=300,
+                            timeout=120,  # Reduced timeout to 2 minutes
                         )
+
+                    except subprocess.TimeoutExpired:
+                        logger.error(f"ffmpeg transcode timeout for {file_id}")
+                        write_json_response(
+                            self,
+                            {"error": "ffmpeg tomó demasiado tiempo (timeout). El video puede ser muy grande o el servidor puede estar sobrecargado."},
+                            HTTPStatus.REQUEST_TIMEOUT,
+                        )
+                        return
+                    except Exception as e:
+                        logger.error(f"ffmpeg transcode exception: {e}")
+                        write_json_response(
+                            self,
+                            {"error": f"Error durante transcodificación: {str(e)}"},
+                            HTTPStatus.INTERNAL_SERVER_ERROR,
+                        )
+                        return
 
                         logger.info(f"ffmpeg completed: returncode={result.returncode}")
                         logger.info(f"ffmpeg stdout: {result.stdout.decode('utf-8', errors='replace')[-500:]}")
                         logger.info(f"ffmpeg stderr: {result.stderr.decode('utf-8', errors='replace')[-500:]}")
                         logger.info(f"Output file exists: {os.path.exists(tmp_out_path)}")
-                        
+
                         if result.returncode != 0:
                             error_msg = result.stderr.decode('utf-8', errors='replace')[-400:]
                             logger.error(f"ffmpeg transcode failed: {error_msg}")
@@ -1097,7 +1114,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                                 HTTPStatus.INTERNAL_SERVER_ERROR,
                             )
                             return
-                            
+
                         if not os.path.exists(tmp_out_path):
                             logger.error(f"ffmpeg output file not found: {tmp_out_path}")
                             write_json_response(
@@ -1108,6 +1125,16 @@ class BounceHandler(SimpleHTTPRequestHandler):
                             return
 
                         out_size = os.path.getsize(tmp_out_path)
+                        if out_size == 0:
+                            logger.error(f"ffmpeg output file is empty: {tmp_out_path}")
+                            write_json_response(
+                                self,
+                                {"error": "ffmpeg generó un archivo vacío"},
+                                HTTPStatus.INTERNAL_SERVER_ERROR,
+                            )
+                            return
+
+                        logger.info(f"Transcoding completed successfully, output size: {out_size} bytes")
                         self.send_response(HTTPStatus.OK)
                         self.send_header("Content-Type", "video/mp4")
                         self.send_header("Content-Disposition", "inline")

@@ -57,6 +57,7 @@ const elements = {
   overlayPreview: document.getElementById('overlayPreview'),
   overlayPreviewText: document.getElementById('overlayPreviewText'),
   reloadPreviewButton: document.getElementById('reloadPreviewButton'),
+  playVideoButton: document.getElementById('playVideoButton'),
   openInDriveLink: document.getElementById('openInDriveLink'),
   metaName: document.getElementById('metaName'),
   metaPath: document.getElementById('metaPath'),
@@ -151,6 +152,16 @@ function bindEvents() {
     if (file) {
       void loadPreview(file, { force: true });
     }
+  });
+  elements.playVideoButton.addEventListener('click', () => {
+    console.log("[PREVIEW] Manual play button clicked");
+    elements.previewVideo.play().then(() => {
+      console.log("[PREVIEW] Manual play successful");
+      elements.playVideoButton.hidden = true;
+    }).catch(err => {
+      console.error("[PREVIEW] Manual play failed:", err);
+      setStatus(`No se pudo reproducir: ${err.message}`, 'error');
+    });
   });
   elements.exportButton.addEventListener('click', () => {
     void exportCurrentSelection();
@@ -832,19 +843,27 @@ function showPreview(file, previewToken) {
     elements.previewVideo._errorHandler = async () => {
       if (previewToken !== undefined && previewToken !== state.currentPreviewToken) return;
       console.error("[PREVIEW] Video error event fired");
+      console.error("[PREVIEW] Video error code:", elements.previewVideo.error?.code);
+      console.error("[PREVIEW] Video error message:", elements.previewVideo.error?.message);
+
       // Try to get the actual error from the proxy
       try {
         const resp = await fetch(`/api/drive/proxy/${file.id}`);
         if (!resp.ok) {
           const data = await resp.json().catch(() => ({}));
           const msg = data.error || `Error ${resp.status}`;
+          console.error("[PREVIEW] Server error:", msg);
           elements.previewPlaceholder.textContent = msg;
           elements.previewPlaceholder.hidden = false;
           elements.previewVideo.hidden = true;
           setStatus(`No se puede reproducir: ${msg}`, 'error');
           return;
         }
-      } catch (_) {}
+      } catch (fetchError) {
+        console.error("[PREVIEW] Error fetching server error:", fetchError);
+      }
+
+      // Generic error message
       elements.previewPlaceholder.textContent = 'Este formato de video no es compatible con el navegador.';
       elements.previewPlaceholder.hidden = false;
       elements.previewVideo.hidden = true;
@@ -856,8 +875,17 @@ function showPreview(file, previewToken) {
     elements.previewVideo._loadedMetadataHandler = () => {
       if (previewToken !== undefined && previewToken !== state.currentPreviewToken) return;
       console.log('Video loadedmetadata event fired');
+      console.log("[PREVIEW] Video dimensions:", elements.previewVideo.videoWidth, "x", elements.previewVideo.videoHeight);
+      console.log("[PREVIEW] Video duration:", elements.previewVideo.duration);
       console.log("[PREVIEW] Hiding placeholder, showing video");
       elements.previewPlaceholder.hidden = true;
+      elements.previewVideo.hidden = false;
+      elements.previewVideo.style.display = 'block';
+      elements.previewVideo.style.visibility = 'visible';
+
+      // Show manual play button in case autoplay fails
+      elements.playVideoButton.hidden = false;
+
       setStatus(`Preview listo para "${file.name}".`, 'success');
     };
     elements.previewVideo.addEventListener('loadedmetadata', elements.previewVideo._loadedMetadataHandler, { once: true });
@@ -874,6 +902,37 @@ function showPreview(file, previewToken) {
     elements.previewVideo.src = state.currentPreviewUrl;
     elements.previewVideo.hidden = false;
     elements.previewVideo.load();
+
+    console.log("[PREVIEW] Video src set, hidden=false, load() called");
+    console.log("[PREVIEW] Video element:", elements.previewVideo);
+    console.log("[PREVIEW] Video dimensions:", elements.previewVideo.videoWidth, "x", elements.previewVideo.videoHeight);
+
+    // Auto-play the video once it's ready
+    elements.previewVideo._canPlayThroughHandler = () => {
+      if (previewToken !== undefined && previewToken !== state.currentPreviewToken) return;
+      console.log('Video canplaythrough event fired, attempting to play');
+      console.log("[PREVIEW] Video duration:", elements.previewVideo.duration);
+      console.log("[PREVIEW] Video readyState:", elements.previewVideo.readyState);
+
+      elements.previewVideo.play().then(() => {
+        console.log("[PREVIEW] Video started playing successfully");
+        elements.playVideoButton.hidden = true;  // Hide manual play button on successful autoplay
+      }).catch(err => {
+        console.log('[PREVIEW] Auto-play failed:', err);
+        console.log('[PREVIEW] User may need to click play manually due to browser policies');
+        // Keep manual play button visible
+      });
+    };
+    elements.previewVideo.addEventListener('canplaythrough', elements.previewVideo._canPlayThroughHandler, { once: true });
+
+    // Also try to play on canplay as fallback
+    elements.previewVideo._canPlayHandler = () => {
+      if (previewToken !== undefined && previewToken !== state.currentPreviewToken) return;
+      console.log('Video canplay event fired, attempting to play');
+      elements.previewVideo.play().catch(err => {
+        console.log('[PREVIEW] Play on canplay failed:', err);
+      });
+    };
   }
 
   syncOverlayControls();
@@ -892,6 +951,7 @@ function clearCurrentPreview() {
   elements.previewVideo.pause();
   elements.previewVideo.hidden = true;
   elements.previewVideo.removeAttribute('src');
+  elements.playVideoButton.hidden = true;  // Hide manual play button
   elements.overlayPreview.hidden = true;
 
 
