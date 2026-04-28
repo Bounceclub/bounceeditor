@@ -878,13 +878,28 @@ function showPreview(file, previewToken) {
       console.log("[PREVIEW] Video dimensions:", elements.previewVideo.videoWidth, "x", elements.previewVideo.videoHeight);
       console.log("[PREVIEW] Video duration:", elements.previewVideo.duration);
       console.log("[PREVIEW] Hiding placeholder, showing video");
+
+      // Hide placeholder
       elements.previewPlaceholder.hidden = true;
+      elements.previewPlaceholder.style.display = 'none';
+
+      // Show video
       elements.previewVideo.hidden = false;
+      elements.previewVideo.removeAttribute('hidden');
       elements.previewVideo.style.display = 'block';
       elements.previewVideo.style.visibility = 'visible';
+      elements.previewVideo.style.position = 'absolute';
+      elements.previewVideo.style.inset = '0';
+      elements.previewVideo.style.zIndex = '1';
 
       // Show manual play button in case autoplay fails
       elements.playVideoButton.hidden = false;
+      elements.playVideoButton.style.display = 'block';
+
+      console.log("[PREVIEW] Video element styles applied");
+      console.log("[PREVIEW] Video display:", elements.previewVideo.style.display);
+      console.log("[PREVIEW] Video visibility:", elements.previewVideo.style.visibility);
+      console.log("[PREVIEW] Video hidden attribute:", elements.previewVideo.hidden);
 
       setStatus(`Preview listo para "${file.name}".`, 'success');
     };
