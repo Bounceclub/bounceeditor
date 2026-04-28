@@ -8,6 +8,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import io
 from email import policy
 from email.parser import BytesParser
 from http import HTTPStatus
@@ -15,6 +16,12 @@ from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
+
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
 
 
 ROOT = Path(__file__).resolve().parent
@@ -126,6 +133,50 @@ def cleanup_temp_dir() -> None:
             print(f"[FFMPEG] Error cleaning up temp directory: {e}")
         finally:
             TEMP_DIR = None
+
+
+def generate_placeholder_thumbnail(file_type: str = "VID") -> bytes:
+    """Generate a placeholder thumbnail image.
+
+    Args:
+        file_type: File type to display on the thumbnail (VID, IMG, etc.)
+
+    Returns:
+        PNG image bytes
+    """
+    if PIL_AVAILABLE:
+        try:
+            # Create a dark placeholder image
+            img = Image.new('RGB', (320, 180), color='#1a1a2e')
+            draw = ImageDraw.Draw(img)
+
+            # Add a simple movie icon (rectangle with play triangle)
+            # Background rectangle
+            draw.rectangle([100, 50, 220, 130], fill='#16213e', outline='#0f3460', width=2)
+
+            # Play triangle
+            draw.polygon([(145, 70), (145, 110), (185, 90)], fill='#e94560')
+
+            # Add file type text
+            text_color = '#ffffff'
+            try:
+                # Try to use a default font
+                font = ImageFont.load_default()
+                draw.text((10, 155), file_type.upper(), fill=text_color, font=font)
+            except:
+                # If font loading fails, skip text
+                pass
+
+            # Convert to PNG bytes
+            img_io = io.BytesIO()
+            img.save(img_io, 'PNG')
+            return img_io.getvalue()
+
+        except Exception as e:
+            logger.error(f"Error generating placeholder thumbnail: {e}")
+
+    # Fallback to simple 1x1 PNG if PIL is not available or on error
+    return b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\x0d\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
 
 
 def transcode_video_to_mp4(input_data: bytes, max_duration: int = 30) -> bytes:
@@ -1129,8 +1180,16 @@ class BounceHandler(SimpleHTTPRequestHandler):
 
                         ffmpeg_cmd = [
                             ffmpeg_bin, "-y", "-i", tmp_in_path,
-                            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-                            "-c:a", "aac", "-movflags", "+faststart",
+                            # Video codec settings for better compatibility
+                            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+                            # Ensure proper pixel format for web compatibility
+                            "-pix_fmt", "yuv420p",
+                            # Audio codec
+                            "-c:a", "aac", "-b:a", "128k",
+                            # MP4 optimization for streaming
+                            "-movflags", "+faststart",
+                            # Ensure proper frame rate
+                            "-r", "30",
                         ] + duration_limit + [tmp_out_path]
 
                         logger.info(f"[PROXY] file_id={file_id} Running ffmpeg command: {' '.join(ffmpeg_cmd)}")
@@ -1300,9 +1359,10 @@ class BounceHandler(SimpleHTTPRequestHandler):
         if not thumbnail_link:
             logger.warning(f"No thumbnail link for file {file_id}, generating placeholder")
 
-            # Generate a simple placeholder thumbnail
-            # Create a 1x1 transparent PNG as placeholder
-            placeholder_png = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\x0d\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+            # Generate placeholder thumbnail
+            file_type = file_data.get('type', 'VID')
+            placeholder_png = generate_placeholder_thumbnail(file_type)
+            logger.info(f"Generated placeholder thumbnail for file {file_id}, size: {len(placeholder_png)} bytes")
 
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "image/png")
@@ -1345,7 +1405,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
         except urllib.error.HTTPError as e:
             logger.error(f"HTTPError fetching thumbnail {file_id}: {e.code} - {e.reason}")
             # Return placeholder on HTTP error
-            placeholder_png = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\x0d\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+            placeholder_png = generate_placeholder_thumbnail("ERROR")
 
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "image/png")
@@ -1357,7 +1417,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
         except urllib.error.URLError as e:
             logger.error(f"URLError fetching thumbnail {file_id}: {e.reason}")
             # Return placeholder on URL error
-            placeholder_png = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\x0d\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+            placeholder_png = generate_placeholder_thumbnail("URL")
 
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "image/png")
@@ -1369,7 +1429,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
         except TimeoutError as e:
             logger.error(f"Timeout fetching thumbnail {file_id}: {str(e)}")
             # Return placeholder on timeout
-            placeholder_png = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\x0d\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+            placeholder_png = generate_placeholder_thumbnail("TIMEOUT")
 
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "image/png")
@@ -1381,7 +1441,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Error fetching thumbnail {file_id}: {str(e)}")
             # Return placeholder on any other error
-            placeholder_png = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\x0d\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+            placeholder_png = generate_placeholder_thumbnail("ERROR")
 
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "image/png")
