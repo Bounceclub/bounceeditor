@@ -618,9 +618,9 @@ async function crawlDriveTree(parsedFolder, rootName) {
           modifiedTime: item.modifiedTime || '',
           resourceKey: item.resourceKey || '',
           webViewLink: item.webViewLink || '',
-          width: Number(item.videoMediaMetadata?.width || item.imageMediaMetadata?.width || 0),
-          height: Number(item.videoMediaMetadata?.height || item.imageMediaMetadata?.height || 0),
-          durationMs: Number(item.videoMediaMetadata?.durationMillis || 0),
+          width: Number(item.videoMeta?.width || item.imageMeta?.width || 0),
+          height: Number(item.videoMeta?.height || item.imageMeta?.height || 0),
+          durationMs: Number(item.videoMeta?.durationMillis || 0),
           path: current.path,
           kind,
         });

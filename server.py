@@ -318,7 +318,26 @@ def list_drive_folder(folder_id: str, token: str) -> list[dict]:
                 else:
                     file_type = "img"
 
-                print(f"[DRIVE] Including file: {f.get('name')}, type: {file_type}, mimeType: {mime}", flush=True)
+                # Extract video metadata
+                video_meta = f.get("videoMediaMetadata", {})
+                image_meta = f.get("imageMediaMetadata", {})
+
+                # For F4V files, Drive might not provide videoMediaMetadata
+                # Try to extract basic info from the file itself
+                if not video_meta and file_type == "vid":
+                    # Create minimal metadata for F4V files
+                    file_size = int(f.get("size", 0) or 0)
+                    # Estimate duration based on file size (rough estimate: 1MB ≈ 5 seconds for standard quality)
+                    estimated_duration_ms = max(1000, int(file_size / (1024 * 1024) * 5000)) if file_size > 0 else 0
+
+                    video_meta = {
+                        "durationMillis": estimated_duration_ms,
+                        "height": 1080,  # Default assumption
+                        "width": 1920,   # Default assumption
+                    }
+                    print(f"[DRIVE] F4V file {f.get('name')}: estimated duration {estimated_duration_ms}ms from size {file_size}", flush=True)
+
+                print(f"[DRIVE] Including file: {f.get('name')}, type: {file_type}, mimeType: {mime}, videoMeta: {video_meta}", flush=True)
 
                 results.append({
                     "id": f["id"],
@@ -328,8 +347,8 @@ def list_drive_folder(folder_id: str, token: str) -> list[dict]:
                     "thumbnailLink": f.get("thumbnailLink", ""),
                     "modifiedTime": f.get("modifiedTime", ""),
                     "type": file_type,
-                    "videoMeta": f.get("videoMediaMetadata", {}),
-                    "imageMeta": f.get("imageMediaMetadata", {}),
+                    "videoMeta": video_meta,
+                    "imageMeta": image_meta,
                 })
             else:
                 print(f"[DRIVE] Filtering out file: {f.get('name')}, mimeType: {mime}", flush=True)
@@ -1079,6 +1098,8 @@ class BounceHandler(SimpleHTTPRequestHandler):
                     # ── Transcode path ─────────────────────────────────────
                     tmp_in = tempfile.NamedTemporaryFile(suffix=".input", delete=False)
                     tmp_in_path = tmp_in.name
+                    tmp_out_path = None
+
                     try:
                         # Download entire file first
                         logger.info(f"[PROXY] file_id={file_id} Downloading file for transcoding", flush=True)
@@ -1171,6 +1192,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                                     self.wfile.write(chunk)
                                 except (BrokenPipeError, ConnectionResetError):
                                     break
+
                     except subprocess.TimeoutExpired:
                         logger.error(f"[PROXY] file_id={file_id} ffmpeg transcode timeout (600s)", flush=True)
                         write_json_response(
@@ -1188,11 +1210,13 @@ class BounceHandler(SimpleHTTPRequestHandler):
                         )
                         return
                     finally:
-                        for p in (tmp_in_path, tmp_in_path + ".mp4"):
-                            try:
-                                os.unlink(p)
-                            except OSError:
-                                pass
+                        # Clean up temporary files
+                        for p in (tmp_in_path, tmp_out_path):
+                            if p and os.path.exists(p):
+                                try:
+                                    os.unlink(p)
+                                except OSError:
+                                    pass
                     return
 
                 if needs_transcode and not ffmpeg_bin:
@@ -1238,38 +1262,49 @@ class BounceHandler(SimpleHTTPRequestHandler):
     def handle_drive_thumbnail(self, file_id: str):
         """Serve Drive thumbnails with proper CORS headers."""
         CHUNK = 64 * 1024  # 64KB chunks for thumbnails
-        
+
         logger.info(f"Thumbnail request for file_id: {file_id}")
-        
+
         # Get thumbnail link from cached library
         file_data = None
         for file in _drive_cache.get("files", []):
             if file.get("id") == file_id:
                 file_data = file
                 break
-        
+
         if not file_data:
             logger.warning(f"File {file_id} not found in cache")
             write_json_response(self, {"error": "File not found in library cache"}, HTTPStatus.NOT_FOUND)
             return
-        
+
         thumbnail_link = file_data.get("thumbnailLink", "")
         if not thumbnail_link:
-            logger.warning(f"No thumbnail link for file {file_id}")
-            write_json_response(self, {"error": "No thumbnail available"}, HTTPStatus.NOT_FOUND)
+            logger.warning(f"No thumbnail link for file {file_id}, generating placeholder")
+
+            # Generate a simple placeholder thumbnail
+            # Create a 1x1 transparent PNG as placeholder
+            placeholder_png = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\x0d\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(placeholder_png)))
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(placeholder_png)
             return
-        
+
         try:
             # Download thumbnail from Drive
             token = get_google_access_token()
             req = urllib.request.Request(thumbnail_link, headers={"Authorization": f"Bearer {token}"})
-            
+
             with urllib.request.urlopen(req, timeout=30) as resp:
                 content_type = resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
                 content_length = resp.headers.get("Content-Length", "")
-                
+
                 logger.info(f"Thumbnail content-type: {content_type}, size: {content_length}")
-                
+
                 # Stream the thumbnail with proper CORS headers
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", content_type)
@@ -1279,7 +1314,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                 if content_length:
                     self.send_header("Content-Length", content_length)
                 self.end_headers()
-                
+
                 while True:
                     chunk = resp.read(CHUNK)
                     if not chunk:
@@ -1288,9 +1323,19 @@ class BounceHandler(SimpleHTTPRequestHandler):
                         self.wfile.write(chunk)
                     except (BrokenPipeError, ConnectionResetError):
                         break
-                
-                logger.info(f"Thumbnail served successfully for {file_id}")
-                
+        except Exception as e:
+            logger.error(f"Error serving thumbnail for {file_id}: {e}")
+            # Return placeholder on error
+            placeholder_png = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\x0d\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(placeholder_png)))
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(placeholder_png)
+
         except urllib.error.HTTPError as e:
             logger.error(f"HTTPError fetching thumbnail {file_id}: {e.code} - {e.reason}")
             write_json_response(self, {"error": f"Drive error {e.code}: {e.reason}"}, HTTPStatus.BAD_GATEWAY)
