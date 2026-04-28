@@ -1069,20 +1069,77 @@ async function exportVideoClientSide(options, file) {
     throw new Error('Este navegador no soporta exportación de video en MP4.');
   }
 
+  // Download video as blob first to ensure smooth playback during export
+  console.log("[VIDEO_EXPORT] Downloading video as blob for smooth export...");
+  let videoBlob;
+  let videoUrl;
+  
+  if (state.currentPreviewBlob && state.currentPreviewFileId === file.id) {
+    // Reuse existing blob if available
+    console.log("[VIDEO_EXPORT] Reusing existing preview blob");
+    videoBlob = state.currentPreviewBlob;
+    videoUrl = state.currentPreviewUrl;
+  } else {
+    // Download the video completely
+    try {
+      console.log("[VIDEO_EXPORT] Fetching video from:", `/api/drive/proxy/${file.id}`);
+      const response = await fetch(`/api/drive/proxy/${file.id}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch video: ${response.status}`);
+      }
+      videoBlob = await response.blob();
+      console.log("[VIDEO_EXPORT] Video blob downloaded, size:", videoBlob.size);
+      videoUrl = URL.createObjectURL(videoBlob);
+    } catch (error) {
+      console.error("[VIDEO_EXPORT] Failed to download video blob:", error);
+      throw new Error(`No pude descargar el video: ${error.message}`);
+    }
+  }
+
   const video = document.createElement('video');
-  video.src = state.currentPreviewUrl || URL.createObjectURL(state.currentPreviewBlob);
+  video.src = videoUrl;
   video.preload = 'auto';
   video.playsInline = true;
   video.muted = true;
+  video.crossOrigin = 'anonymous';
 
-  await waitForVideo(video);
+  // Wait for video to be fully buffered (canplaythrough = readyState 4)
+  console.log("[VIDEO_EXPORT] Waiting for video to be fully buffered...");
+  await new Promise((resolve, reject) => {
+    const checkReadyState = () => {
+      console.log("[VIDEO_EXPORT] Video readyState:", video.readyState, "HAVE_ENOUGH_DATA:", video.readyState >= 4);
+      if (video.readyState >= 4) { // HAVE_ENOUGH_DATA
+        console.log("[VIDEO_EXPORT] Video fully buffered, ready for export");
+        resolve();
+      } else {
+        // If not ready, wait a bit and check again
+        setTimeout(checkReadyState, 100);
+      }
+    };
+    
+    video.addEventListener('loadedmetadata', () => {
+      console.log("[VIDEO_EXPORT] Video metadata loaded, duration:", video.duration);
+      checkReadyState();
+    }, { once: true });
+    
+    video.addEventListener('error', (error) => {
+      console.error("[VIDEO_EXPORT] Video error during load:", error);
+      reject(new Error('No pude leer el video.'));
+    }, { once: true });
+    
+    // Start loading if metadata already loaded
+    if (video.readyState >= 1) {
+      checkReadyState();
+    }
+  });
 
   const canvas = document.createElement('canvas');
   canvas.width = OUTPUT_WIDTH;
   canvas.height = OUTPUT_HEIGHT;
   const context = canvas.getContext('2d');
 
-  const canvasStream = canvas.captureStream(30);
+  // Use 24fps for better compatibility with larger videos
+  const canvasStream = canvas.captureStream(24);
   const sourceStream = typeof video.captureStream === 'function' ? video.captureStream() : null;
   const composedStream = new MediaStream([
     ...canvasStream.getVideoTracks(),
@@ -1098,18 +1155,39 @@ async function exportVideoClientSide(options, file) {
       }
     });
     recorder.addEventListener('stop', () => {
+      console.log("[VIDEO_EXPORT] Recorder stopped, creating blob");
       resolve(new Blob(chunks, { type: mimeType }));
     });
     recorder.addEventListener('error', (event) => {
+      console.error("[VIDEO_EXPORT] Recorder error:", event);
       reject(event.error || new Error('MediaRecorder falló.'));
     });
   });
 
   let rafId = 0;
   let lastPercent = -1;
+  let frozenFrameCount = 0;
+  let lastDrawTime = Date.now();
 
   const drawFrame = () => {
-    drawSceneToCanvas(context, video, options);
+    // Only draw if video has data ready (readyState >= 2 = HAVE_CURRENT_DATA)
+    if (video.readyState >= 2) {
+      drawSceneToCanvas(context, video, options);
+      
+      // Detect frozen frames (same time for too long)
+      const currentTime = Date.now();
+      if (currentTime - lastDrawTime > 200) { // More than 200ms since last draw
+        frozenFrameCount++;
+        if (frozenFrameCount > 5) {
+          console.warn("[VIDEO_EXPORT] Detected frozen frames, readyState:", video.readyState);
+        }
+      } else {
+        frozenFrameCount = 0;
+      }
+      lastDrawTime = currentTime;
+    } else {
+      console.warn("[VIDEO_EXPORT] Skipping draw, video not ready (readyState:", video.readyState + ")");
+    }
 
     if (video.duration) {
       const percent = Math.min(100, Math.round((video.currentTime / video.duration) * 100));
@@ -1124,7 +1202,8 @@ async function exportVideoClientSide(options, file) {
     }
   };
 
-  recorder.start(250);
+  console.log("[VIDEO_EXPORT] Starting recorder and playback");
+  recorder.start(250); // 250ms chunks for better quality
   drawSceneToCanvas(context, video, options);
   video.currentTime = 0;
   await video.play();
@@ -1134,15 +1213,21 @@ async function exportVideoClientSide(options, file) {
     video.addEventListener('ended', resolve, { once: true });
   });
 
+  console.log("[VIDEO_EXPORT] Video playback ended, stopping recorder");
   cancelAnimationFrame(rafId);
   drawSceneToCanvas(context, video, options);
   if (recorder.state !== 'inactive') {
     recorder.stop();
   }
 
+  // Clean up blob URL if we created one
+  if (videoUrl && videoUrl.startsWith('blob:') && videoUrl !== state.currentPreviewUrl) {
+    URL.revokeObjectURL(videoUrl);
+    console.log("[VIDEO_EXPORT] Cleaned up temporary blob URL");
+  }
+
   return stopPromise;
 }
-
 async function waitForVideo(video) {
   if (video.readyState >= 1) {
     return;
