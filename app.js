@@ -771,7 +771,7 @@ async function loadPreview(file, { force = false } = {}) {
     setStatus(`Cargando preview de "${file.name}"...`, 'info');
   }
   elements.previewPlaceholder.hidden = false;
-  elements.previewPlaceholder.textContent = file.kind === 'video' ? 'Transcodificando video... (puede tardar 10-30 segundos)' : 'Cargando...';
+  elements.previewPlaceholder.textContent = file.kind === 'video' ? 'Transcodificando video... (puede tardar hasta 60 segundos)' : 'Cargando...';
 
   if (token !== state.currentPreviewToken) return;
 

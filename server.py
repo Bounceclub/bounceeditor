@@ -300,10 +300,26 @@ def list_drive_folder(folder_id: str, token: str) -> list[dict]:
 
         for f in files:
             mime = f.get("mimeType", "")
+            file_name = f.get("name", "").lower()
+
+            # Log ALL files for debugging F4V detection
+            print(f"[DRIVE] File: {f.get('name')}, mimeType: {mime}, size: {f.get('size')}", flush=True)
+
             if mime == "application/vnd.google-apps.folder":
                 # Recurse into subfolder
                 results.extend(list_drive_folder(f["id"], token))
-            elif mime.startswith("video/") or mime.startswith("image/"):
+            elif (mime.startswith("video/") or mime.startswith("image/") or
+                  mime in ["video/x-f4v", "video/f4v", "application/f4v"] or
+                  file_name.endswith(".f4v")):
+
+                # Determine file type - F4V should always be 'vid'
+                if mime.startswith("video/") or mime in ["video/x-f4v", "video/f4v", "application/f4v"] or file_name.endswith(".f4v"):
+                    file_type = "vid"
+                else:
+                    file_type = "img"
+
+                print(f"[DRIVE] Including file: {f.get('name')}, type: {file_type}, mimeType: {mime}", flush=True)
+
                 results.append({
                     "id": f["id"],
                     "name": f.get("name", ""),
@@ -311,10 +327,12 @@ def list_drive_folder(folder_id: str, token: str) -> list[dict]:
                     "size": int(f.get("size", 0) or 0),
                     "thumbnailLink": f.get("thumbnailLink", ""),
                     "modifiedTime": f.get("modifiedTime", ""),
-                    "type": "vid" if mime.startswith("video/") else "img",
+                    "type": file_type,
                     "videoMeta": f.get("videoMediaMetadata", {}),
                     "imageMeta": f.get("imageMediaMetadata", {}),
                 })
+            else:
+                print(f"[DRIVE] Filtering out file: {f.get('name')}, mimeType: {mime}", flush=True)
 
         page_token = data.get("nextPageToken")
         if not page_token:
@@ -967,6 +985,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                     TRANSCODE_TYPES = {
                         "video/quicktime", "video/x-msvideo", "video/x-ms-wmv",
                         "video/x-matroska", "video/x-flv", "video/3gpp", "video/3gpp2",
+                        "video/x-f4v", "video/f4v", "application/f4v",  # Added F4V support
                     }
                     needs_transcode = content_type in TRANSCODE_TYPES
 
@@ -1002,7 +1021,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
     def handle_drive_proxy(self, path: str):
         """Streaming proxy with Range support.
         - MP4/WebM/images: streamed directly with correct headers.
-        - MOV/QuickTime/AVI/MKV: transcoded to MP4 via ffmpeg (if available).
+        - MOV/QuickTime/AVI/MKV/F4V: transcoded to MP4 via ffmpeg (if available).
         - If ffmpeg is missing and format is unsupported, returns a clear error.
         """
         CHUNK = 256 * 1024
@@ -1010,6 +1029,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
         TRANSCODE_TYPES = {
             "video/quicktime", "video/x-msvideo", "video/x-ms-wmv",
             "video/x-matroska", "video/x-flv", "video/3gpp", "video/3gpp2",
+            "video/x-f4v", "video/f4v", "application/f4v",  # Added F4V support
         }
 
         file_id = path.removeprefix("/api/drive/proxy/").split("?")[0].strip()
@@ -1017,7 +1037,10 @@ class BounceHandler(SimpleHTTPRequestHandler):
             write_json_response(self, {"error": "File ID requerido."}, HTTPStatus.BAD_REQUEST)
             return
 
-        logger.info(f"Proxy request for file_id: {file_id}")
+        # Parse query parameters for preview mode
+        parsed = urlparse(self.path)
+
+        logger.info(f"[PROXY] file_id={file_id} starting proxy request", flush=True)
         try:
             token = get_google_access_token()
             drive_url = f"{GOOGLE_DRIVE_FILES_URL}/{file_id}?alt=media&supportsAllDrives=true"
@@ -1032,18 +1055,25 @@ class BounceHandler(SimpleHTTPRequestHandler):
                 status = resp.status
                 content_type = resp.headers.get("Content-Type", "application/octet-stream").split(";")[0].strip()
                 content_length = resp.headers.get("Content-Length", "")
-                logger.info(f"Drive file content-type: {content_type}, size: {content_length}")
+                logger.info(f"[PROXY] file_id={file_id} content_type={content_type} size={content_length}", flush=True)
                 content_range = resp.headers.get("Content-Range", "")
                 accept_ranges = resp.headers.get("Accept-Ranges", "bytes")
 
                 needs_transcode = content_type in TRANSCODE_TYPES
-                logger.info(f"Needs transcode: {needs_transcode}, content_type in TRANSCODE_TYPES")
+                logger.info(f"[PROXY] file_id={file_id} needs_transcode={needs_transcode}", flush=True)
+
+                # Try to get ffmpeg binary
+                ffmpeg_bin = None
                 try:
                     import imageio_ffmpeg
                     ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
-                except Exception:
+                    logger.info(f"[PROXY] file_id={file_id} ffmpeg from imageio_ffmpeg: {ffmpeg_bin}", flush=True)
+                except Exception as e:
+                    logger.warning(f"[PROXY] file_id={file_id} imageio_ffmpeg failed: {e}", flush=True)
                     ffmpeg_bin = shutil.which("ffmpeg")
-                    logger.info(f"ffmpeg found: {ffmpeg_bin is not None}")
+                    logger.info(f"[PROXY] file_id={file_id} ffmpeg from shutil.which: {ffmpeg_bin}", flush=True)
+
+                logger.info(f"[PROXY] file_id={file_id} content_type={content_type} needs_transcode={needs_transcode} ffmpeg={ffmpeg_bin}", flush=True)
 
                 if needs_transcode and ffmpeg_bin and not range_header:
                     # ── Transcode path ─────────────────────────────────────
@@ -1051,7 +1081,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                     tmp_in_path = tmp_in.name
                     try:
                         # Download entire file first
-                        logger.info(f"Downloading file for transcoding: {file_id}")
+                        logger.info(f"[PROXY] file_id={file_id} Downloading file for transcoding", flush=True)
                         while True:
                             chunk = resp.read(CHUNK)
                             if not chunk:
@@ -1060,54 +1090,44 @@ class BounceHandler(SimpleHTTPRequestHandler):
                         tmp_in.close()
 
                         tmp_out_path = tmp_in_path + ".mp4"
-                        
-                        # Check if this is a preview request (first 30 seconds only)
+
+                        # Check if this is a preview request (first 60 seconds only for faster preview)
                         is_preview = "preview" in parsed.query  # Check for ?preview=1 in URL
-                        duration_limit = ["-t", "30"] if is_preview else []
-                        
-                        logger.info(f"Starting ffmpeg transcode for {file_id}, preview={is_preview}")
-                        logger.info(f"ffmpeg binary: {ffmpeg_bin}")
-                        logger.info(f"Input file: {tmp_in_path}, Output file: {tmp_out_path}")
-                        
+                        if is_preview:
+                            # For preview: transcode only first 60 seconds for speed
+                            duration_limit = ["-ss", "0", "-t", "60"]
+                            logger.info(f"[PROXY] file_id={file_id} Preview mode: transcoding first 60 seconds only", flush=True)
+                        else:
+                            # For full export: transcode entire video
+                            duration_limit = []
+                            logger.info(f"[PROXY] file_id={file_id} Full mode: transcoding entire video", flush=True)
+
+                        logger.info(f"[PROXY] file_id={file_id} Starting ffmpeg transcode, preview={is_preview}", flush=True)
+                        logger.info(f"[PROXY] file_id={file_id} ffmpeg binary: {ffmpeg_bin}", flush=True)
+                        logger.info(f"[PROXY] file_id={file_id} Input file: {tmp_in_path}, Output file: {tmp_out_path}", flush=True)
+
                         ffmpeg_cmd = [
                             ffmpeg_bin, "-y", "-i", tmp_in_path,
                             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
                             "-c:a", "aac", "-movflags", "+faststart",
                         ] + duration_limit + [tmp_out_path]
 
-                        logger.info(f"Running ffmpeg command: {' '.join(ffmpeg_cmd)}")
+                        logger.info(f"[PROXY] file_id={file_id} Running ffmpeg command: {' '.join(ffmpeg_cmd)}", flush=True)
 
                         result = subprocess.run(
                             ffmpeg_cmd,
                             capture_output=True,
-                            timeout=120,  # Reduced timeout to 2 minutes
+                            timeout=600,  # Increased timeout to 10 minutes for large files
                         )
 
-                    except subprocess.TimeoutExpired:
-                        logger.error(f"ffmpeg transcode timeout for {file_id}")
-                        write_json_response(
-                            self,
-                            {"error": "ffmpeg tomó demasiado tiempo (timeout). El video puede ser muy grande o el servidor puede estar sobrecargado."},
-                            HTTPStatus.REQUEST_TIMEOUT,
-                        )
-                        return
-                    except Exception as e:
-                        logger.error(f"ffmpeg transcode exception: {e}")
-                        write_json_response(
-                            self,
-                            {"error": f"Error durante transcodificación: {str(e)}"},
-                            HTTPStatus.INTERNAL_SERVER_ERROR,
-                        )
-                        return
-
-                        logger.info(f"ffmpeg completed: returncode={result.returncode}")
-                        logger.info(f"ffmpeg stdout: {result.stdout.decode('utf-8', errors='replace')[-500:]}")
-                        logger.info(f"ffmpeg stderr: {result.stderr.decode('utf-8', errors='replace')[-500:]}")
-                        logger.info(f"Output file exists: {os.path.exists(tmp_out_path)}")
+                        logger.info(f"[PROXY] file_id={file_id} ffmpeg completed: returncode={result.returncode}", flush=True)
+                        logger.info(f"[PROXY] file_id={file_id} ffmpeg stdout: {result.stdout.decode('utf-8', errors='replace')[-500:]}", flush=True)
+                        logger.info(f"[PROXY] file_id={file_id} ffmpeg stderr: {result.stderr.decode('utf-8', errors='replace')[-500:]}", flush=True)
+                        logger.info(f"[PROXY] file_id={file_id} Output file exists: {os.path.exists(tmp_out_path)}", flush=True)
 
                         if result.returncode != 0:
                             error_msg = result.stderr.decode('utf-8', errors='replace')[-400:]
-                            logger.error(f"ffmpeg transcode failed: {error_msg}")
+                            logger.error(f"[PROXY] file_id={file_id} ffmpeg transcode failed: {error_msg}", flush=True)
                             write_json_response(
                                 self,
                                 {"error": f"ffmpeg falló: {error_msg}"},
@@ -1116,7 +1136,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                             return
 
                         if not os.path.exists(tmp_out_path):
-                            logger.error(f"ffmpeg output file not found: {tmp_out_path}")
+                            logger.error(f"[PROXY] file_id={file_id} ffmpeg output file not found: {tmp_out_path}", flush=True)
                             write_json_response(
                                 self,
                                 {"error": "ffmpeg no generó el archivo de salida"},
@@ -1126,7 +1146,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
 
                         out_size = os.path.getsize(tmp_out_path)
                         if out_size == 0:
-                            logger.error(f"ffmpeg output file is empty: {tmp_out_path}")
+                            logger.error(f"[PROXY] file_id={file_id} ffmpeg output file is empty: {tmp_out_path}", flush=True)
                             write_json_response(
                                 self,
                                 {"error": "ffmpeg generó un archivo vacío"},
@@ -1134,7 +1154,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                             )
                             return
 
-                        logger.info(f"Transcoding completed successfully, output size: {out_size} bytes")
+                        logger.info(f"[PROXY] file_id={file_id} Transcoding completed successfully, output size: {out_size} bytes", flush=True)
                         self.send_response(HTTPStatus.OK)
                         self.send_header("Content-Type", "video/mp4")
                         self.send_header("Content-Disposition", "inline")
@@ -1151,6 +1171,22 @@ class BounceHandler(SimpleHTTPRequestHandler):
                                     self.wfile.write(chunk)
                                 except (BrokenPipeError, ConnectionResetError):
                                     break
+                    except subprocess.TimeoutExpired:
+                        logger.error(f"[PROXY] file_id={file_id} ffmpeg transcode timeout (600s)", flush=True)
+                        write_json_response(
+                            self,
+                            {"error": "ffmpeg tomó demasiado tiempo (timeout > 10 minutos). El video puede ser muy grande o el servidor puede estar sobrecargado. Intenta con un video más pequeño."},
+                            HTTPStatus.REQUEST_TIMEOUT,
+                        )
+                        return
+                    except Exception as e:
+                        logger.error(f"[PROXY] file_id={file_id} ffmpeg transcode exception: {e}", flush=True)
+                        write_json_response(
+                            self,
+                            {"error": f"Error durante transcodificación: {str(e)}"},
+                            HTTPStatus.INTERNAL_SERVER_ERROR,
+                        )
+                        return
                     finally:
                         for p in (tmp_in_path, tmp_in_path + ".mp4"):
                             try:
