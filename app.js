@@ -220,7 +220,13 @@ function bindEvents() {
 }
 
 async function hydrateConfig() {
-  const local = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+  let local = {};
+  try {
+    local = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+  } catch (error) {
+    console.error('Failed to parse localStorage config:', error);
+    local = {};
+  }
   let server = {};
 
   try {
