@@ -995,7 +995,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                 drive_url = f"{GOOGLE_DRIVE_FILES_URL}/{file_id}?alt=media&supportsAllDrives=true"
 
                 req = urllib.request.Request(drive_url, method="HEAD", headers={"Authorization": f"Bearer {token}"})
-                with urllib.request.urlopen(req, timeout=30) as resp:
+                with urllib.request.urlopen(req, timeout=60) as resp:
                     content_type = resp.headers.get("Content-Type", "application/octet-stream").split(";")[0].strip()
                     content_length = resp.headers.get("Content-Length", "")
                     accept_ranges = resp.headers.get("Accept-Ranges", "bytes")
@@ -1259,10 +1259,24 @@ class BounceHandler(SimpleHTTPRequestHandler):
 
         except urllib.error.HTTPError as e:
             logger.error(f"HTTPError proxying {file_id}: {e.code} - {e.reason}")
-            write_json_response(self, {"error": f"Drive error {e.code}: {e.reason}"}, HTTPStatus.BAD_GATEWAY)
+            # Return more specific error codes instead of generic 502
+            if e.code == 404:
+                write_json_response(self, {"error": f"Archivo no encontrado en Drive: {e.reason}"}, HTTPStatus.NOT_FOUND)
+            elif e.code == 403:
+                write_json_response(self, {"error": f"No tenés permiso para acceder a este archivo: {e.reason}"}, HTTPStatus.FORBIDDEN)
+            elif e.code == 401:
+                write_json_response(self, {"error": f"Error de autenticación con Google: {e.reason}"}, HTTPStatus.UNAUTHORIZED)
+            else:
+                write_json_response(self, {"error": f"Drive error {e.code}: {e.reason}"}, HTTPStatus.BAD_GATEWAY)
+        except urllib.error.URLError as e:
+            logger.error(f"URLError proxying {file_id}: {e.reason}")
+            write_json_response(self, {"error": f"Error de conexión con Drive: {e.reason}"}, HTTPStatus.SERVICE_UNAVAILABLE)
+        except TimeoutError as e:
+            logger.error(f"Timeout proxying {file_id}: {str(e)}")
+            write_json_response(self, {"error": "Timeout al conectar con Drive. El archivo puede ser muy grande o hay problemas de conexión."}, HTTPStatus.REQUEST_TIMEOUT)
         except Exception as e:  # noqa: BLE001
             logger.error(f"Error proxying {file_id}: {str(e)}")
-            write_json_response(self, {"error": str(e)}, HTTPStatus.BAD_GATEWAY)
+            write_json_response(self, {"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def handle_drive_thumbnail(self, file_id: str):
         """Serve Drive thumbnails with proper CORS headers."""
@@ -1304,7 +1318,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
             token = get_google_access_token()
             req = urllib.request.Request(thumbnail_link, headers={"Authorization": f"Bearer {token}"})
 
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 content_type = resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
                 content_length = resp.headers.get("Content-Length", "")
 
@@ -1331,6 +1345,30 @@ class BounceHandler(SimpleHTTPRequestHandler):
         except urllib.error.HTTPError as e:
             logger.error(f"HTTPError fetching thumbnail {file_id}: {e.code} - {e.reason}")
             # Return placeholder on HTTP error
+            placeholder_png = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\x0d\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(placeholder_png)))
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(placeholder_png)
+        except urllib.error.URLError as e:
+            logger.error(f"URLError fetching thumbnail {file_id}: {e.reason}")
+            # Return placeholder on URL error
+            placeholder_png = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\x0d\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(placeholder_png)))
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(placeholder_png)
+        except TimeoutError as e:
+            logger.error(f"Timeout fetching thumbnail {file_id}: {str(e)}")
+            # Return placeholder on timeout
             placeholder_png = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\x0d\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
 
             self.send_response(HTTPStatus.OK)
