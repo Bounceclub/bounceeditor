@@ -671,6 +671,12 @@ function renderLibrary() {
     card.className = `media-card ${file.kind}${file.id === state.selectedFileId ? ' active' : ''}`;
     card.dataset.fileId = file.id;
     card.innerHTML = `
+      <div class="card-thumbnail">
+        <img src="/api/drive/thumbnail/${file.id}" 
+             alt="${escapeHtml(file.name)}" 
+             loading="lazy"
+             onerror="this.style.display='none'; this.parentElement.classList.add('no-thumbnail');">
+      </div>
       <div class="card-topline">
         <span class="media-kind">${file.kind === 'video' ? 'VIDEO' : 'IMAGEN'}</span>
         <span class="media-size">${formatSize(file.size)}</span>
@@ -748,9 +754,15 @@ async function loadPreview(file, { force = false } = {}) {
     return;
   }
 
-  setStatus(`Cargando preview de "${file.name}"...`, 'info');
-  elements.previewPlaceholder.hidden = false;
-  elements.previewPlaceholder.textContent = 'Cargando...';
+  if (file.kind === 'video') {
+    setStatus(`Transcodificando video "${file.name}"...`, 'info');
+    elements.previewPlaceholder.hidden = false;
+    elements.previewPlaceholder.textContent = 'Transcodificando video... (puede tardar 10-30 segundos)';
+  } else {
+    setStatus(`Cargando preview de "${file.name}"...`, 'info');
+    elements.previewPlaceholder.hidden = false;
+    elements.previewPlaceholder.textContent = 'Cargando...';
+  }
 
   if (token !== state.currentPreviewToken) return;
 
@@ -760,7 +772,8 @@ async function loadPreview(file, { force = false } = {}) {
   }
 
   if (file.kind === 'video') {
-    state.currentPreviewUrl = `/api/drive/proxy/${file.id}`;
+    // Add ?preview=1 for videos to transcode only first 30 seconds
+    state.currentPreviewUrl = `/api/drive/proxy/${file.id}?preview=1`;
     state.currentPreviewFileId = file.id;
     state.currentPreviewBlob = null;
     showPreview(file, token);

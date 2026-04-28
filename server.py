@@ -716,6 +716,14 @@ class BounceHandler(SimpleHTTPRequestHandler):
             self.handle_drive_proxy(parsed.path)
             return
 
+        if parsed.path.startswith("/api/drive/thumbnail/"):
+            file_id = parsed.path.removeprefix("/api/drive/thumbnail/").split("?")[0].strip()
+            if file_id:
+                self.handle_drive_thumbnail(file_id)
+            else:
+                write_json_response(self, {"error": "File ID requerido."}, HTTPStatus.BAD_REQUEST)
+            return
+
         if parsed.path == "/api/tiktok/status":
             write_json_response(self, make_tiktok_status(self))
             return
@@ -862,6 +870,8 @@ class BounceHandler(SimpleHTTPRequestHandler):
                     tmp_in = tempfile.NamedTemporaryFile(suffix=".input", delete=False)
                     tmp_in_path = tmp_in.name
                     try:
+                        # Download entire file first
+                        logger.info(f"Downloading file for transcoding: {file_id}")
                         while True:
                             chunk = resp.read(CHUNK)
                             if not chunk:
@@ -870,23 +880,49 @@ class BounceHandler(SimpleHTTPRequestHandler):
                         tmp_in.close()
 
                         tmp_out_path = tmp_in_path + ".mp4"
-                        logger.info(f"Starting ffmpeg transcode for {file_id}")
+                        
+                        # Check if this is a preview request (first 30 seconds only)
+                        is_preview = "preview" in parsed.query  # Check for ?preview=1 in URL
+                        duration_limit = ["-t", "30"] if is_preview else []
+                        
+                        logger.info(f"Starting ffmpeg transcode for {file_id}, preview={is_preview}")
+                        logger.info(f"ffmpeg binary: {ffmpeg_bin}")
+                        logger.info(f"Input file: {tmp_in_path}, Output file: {tmp_out_path}")
+                        
+                        ffmpeg_cmd = [
+                            ffmpeg_bin, "-y", "-i", tmp_in_path,
+                            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                            "-c:a", "aac", "-movflags", "+faststart",
+                        ] + duration_limit + [tmp_out_path]
+                        
+                        logger.info(f"Running ffmpeg command: {' '.join(ffmpeg_cmd)}")
+                        
                         result = subprocess.run(
-                            [
-                                ffmpeg_bin, "-y", "-i", tmp_in_path,
-                                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-                                "-c:a", "aac", "-movflags", "+faststart",
-                                tmp_out_path,
-                            ],
+                            ffmpeg_cmd,
                             capture_output=True,
                             timeout=300,
                         )
 
-                        logger.info(f"ffmpeg completed: returncode={result.returncode}, output_exists={os.path.exists(tmp_out_path)}")
-                        if result.returncode != 0 or not os.path.exists(tmp_out_path):
+                        logger.info(f"ffmpeg completed: returncode={result.returncode}")
+                        logger.info(f"ffmpeg stdout: {result.stdout.decode('utf-8', errors='replace')[-500:]}")
+                        logger.info(f"ffmpeg stderr: {result.stderr.decode('utf-8', errors='replace')[-500:]}")
+                        logger.info(f"Output file exists: {os.path.exists(tmp_out_path)}")
+                        
+                        if result.returncode != 0:
+                            error_msg = result.stderr.decode('utf-8', errors='replace')[-400:]
+                            logger.error(f"ffmpeg transcode failed: {error_msg}")
                             write_json_response(
                                 self,
-                                {"error": f"ffmpeg falló: {result.stderr.decode('utf-8', errors='replace')[-400:]}"},
+                                {"error": f"ffmpeg falló: {error_msg}"},
+                                HTTPStatus.INTERNAL_SERVER_ERROR,
+                            )
+                            return
+                            
+                        if not os.path.exists(tmp_out_path):
+                            logger.error(f"ffmpeg output file not found: {tmp_out_path}")
+                            write_json_response(
+                                self,
+                                {"error": "ffmpeg no generó el archivo de salida"},
                                 HTTPStatus.INTERNAL_SERVER_ERROR,
                             )
                             return
@@ -955,6 +991,69 @@ class BounceHandler(SimpleHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             write_json_response(self, {"error": str(e)}, HTTPStatus.BAD_GATEWAY)
             logger.error(f"Error proxying {file_id}: {str(e)}")
+
+    def handle_drive_thumbnail(self, file_id: str):
+        """Serve Drive thumbnails with proper CORS headers."""
+        CHUNK = 64 * 1024  # 64KB chunks for thumbnails
+        
+        logger.info(f"Thumbnail request for file_id: {file_id}")
+        
+        # Get thumbnail link from cached library
+        file_data = None
+        for file in _drive_cache.get("files", []):
+            if file.get("id") == file_id:
+                file_data = file
+                break
+        
+        if not file_data:
+            logger.warning(f"File {file_id} not found in cache")
+            write_json_response(self, {"error": "File not found in library cache"}, HTTPStatus.NOT_FOUND)
+            return
+        
+        thumbnail_link = file_data.get("thumbnailLink", "")
+        if not thumbnail_link:
+            logger.warning(f"No thumbnail link for file {file_id}")
+            write_json_response(self, {"error": "No thumbnail available"}, HTTPStatus.NOT_FOUND)
+            return
+        
+        try:
+            # Download thumbnail from Drive
+            token = get_google_access_token()
+            req = urllib.request.Request(thumbnail_link, headers={"Authorization": f"Bearer {token}"})
+            
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                content_type = resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+                content_length = resp.headers.get("Content-Length", "")
+                
+                logger.info(f"Thumbnail content-type: {content_type}, size: {content_length}")
+                
+                # Stream the thumbnail with proper CORS headers
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Cache-Control", "public, max-age=3600")  # Cache for 1 hour
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Methods", "GET")
+                if content_length:
+                    self.send_header("Content-Length", content_length)
+                self.end_headers()
+                
+                while True:
+                    chunk = resp.read(CHUNK)
+                    if not chunk:
+                        break
+                    try:
+                        self.wfile.write(chunk)
+                    except (BrokenPipeError, ConnectionResetError):
+                        break
+                
+                logger.info(f"Thumbnail served successfully for {file_id}")
+                
+        except urllib.error.HTTPError as e:
+            logger.error(f"HTTPError fetching thumbnail {file_id}: {e.code} - {e.reason}")
+            write_json_response(self, {"error": f"Drive error {e.code}: {e.reason}"}, HTTPStatus.BAD_GATEWAY)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Error fetching thumbnail {file_id}: {str(e)}")
+            write_json_response(self, {"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def handle_save_config(self):
         try:
