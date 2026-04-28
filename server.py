@@ -1161,21 +1161,45 @@ class BounceHandler(SimpleHTTPRequestHandler):
                     try:
                         # Download entire file first
                         logger.info(f"[PROXY] file_id={file_id} Downloading file for transcoding")
+                        downloaded_size = 0
                         while True:
                             chunk = resp.read(CHUNK)
                             if not chunk:
                                 break
                             tmp_in.write(chunk)
+                            downloaded_size += len(chunk)
                         tmp_in.close()
+
+                        # Check file size for cloud environment limits
+                        file_size_mb = downloaded_size / (1024 * 1024)
+                        logger.info(f"[PROXY] file_id={file_id} Downloaded {file_size_mb:.2f} MB")
+
+                        if is_preview and file_size_mb > 100:
+                            logger.warning(f"[PROXY] file_id={file_id} File too large for preview ({file_size_mb:.2f} MB)")
+                            write_json_response(
+                                self,
+                                {"error": f"Archivo muy grande para preview ({file_size_mb:.1f} MB). En Render, el preview funciona mejor con videos menores a 100 MB. Usá la exportación completa para videos grandes."},
+                                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                            )
+                            return
+
+                        if not is_preview and file_size_mb > 500:
+                            logger.warning(f"[PROXY] file_id={file_id} File too large for full export ({file_size_mb:.2f} MB)")
+                            write_json_response(
+                                self,
+                                {"error": f"Archivo muy grande para exportación ({file_size_mb:.1f} MB). En Render, la exportación completa tiene un límite de 500 MB. Considerá comprimir el video antes de subirlo."},
+                                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                            )
+                            return
 
                         tmp_out_path = tmp_in_path + ".mp4"
 
-                        # Check if this is a preview request (first 60 seconds only for faster preview)
+                        # Check if this is a preview request (first 10 seconds only for faster preview on cloud services)
                         is_preview = "preview" in parsed.query  # Check for ?preview=1 in URL
                         if is_preview:
-                            # For preview: transcode only first 60 seconds for speed
-                            duration_limit = ["-ss", "0", "-t", "60"]
-                            logger.info(f"[PROXY] file_id={file_id} Preview mode: transcoding first 60 seconds only")
+                            # For preview: transcode only first 10 seconds for speed (reduced from 60s for cloud services)
+                            duration_limit = ["-ss", "0", "-t", "10"]
+                            logger.info(f"[PROXY] file_id={file_id} Preview mode: transcoding first 10 seconds only")
                         else:
                             # For full export: transcode entire video
                             duration_limit = []
@@ -1187,18 +1211,20 @@ class BounceHandler(SimpleHTTPRequestHandler):
 
                         ffmpeg_cmd = [
                             ffmpeg_bin, "-y", "-i", tmp_in_path,
-                            # Video codec settings for better compatibility
-                            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                            # Video codec settings optimized for speed
+                            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
                             # Ensure proper pixel format for web compatibility
                             "-pix_fmt", "yuv420p",
                             # Ensure proper color space
                             "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
-                            # Audio codec
-                            "-c:a", "aac", "-b:a", "128k",
+                            # Audio codec optimized for speed
+                            "-c:a", "aac", "-b:a", "96k",
                             # MP4 optimization for streaming
                             "-movflags", "+faststart",
                             # Ensure proper frame rate (use source frame rate if available)
                             "-r", "30",
+                            # Additional optimizations for cloud environments
+                            "-threads", "2",
                         ] + duration_limit + [tmp_out_path]
 
                         logger.info(f"[PROXY] file_id={file_id} Running ffmpeg command: {' '.join(ffmpeg_cmd)}")
@@ -1206,7 +1232,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                         result = subprocess.run(
                             ffmpeg_cmd,
                             capture_output=True,
-                            timeout=600,  # Increased timeout to 10 minutes for large files
+                            timeout=120,  # Reduced timeout to 2 minutes for cloud services (was 10 minutes)
                         )
 
                         logger.info(f"[PROXY] file_id={file_id} ffmpeg completed: returncode={result.returncode}")
@@ -1262,20 +1288,37 @@ class BounceHandler(SimpleHTTPRequestHandler):
                                     break
 
                     except subprocess.TimeoutExpired:
-                        logger.error(f"[PROXY] file_id={file_id} ffmpeg transcode timeout (600s)")
+                        logger.error(f"[PROXY] file_id={file_id} ffmpeg transcode timeout (120s)")
                         write_json_response(
                             self,
-                            {"error": "ffmpeg tomó demasiado tiempo (timeout > 10 minutos). El video puede ser muy grande o el servidor puede estar sobrecargado. Intenta con un video más pequeño."},
+                            {"error": "ffmpeg tomó demasiado tiempo (timeout > 2 minutos). En el entorno de Render, los videos grandes pueden fallar. Intenta con un video más pequeño o usa la exportación completa en lugar de preview."},
                             HTTPStatus.REQUEST_TIMEOUT,
+                        )
+                        return
+                    except MemoryError:
+                        logger.error(f"[PROXY] file_id={file_id} ffmpeg transcode out of memory")
+                        write_json_response(
+                            self,
+                            {"error": "Sin memoria para procesar el video. El entorno de Render tiene límites de memoria. Intenta con un video más pequeño."},
+                            HTTPStatus.INTERNAL_SERVER_ERROR,
                         )
                         return
                     except Exception as e:
                         logger.error(f"[PROXY] file_id={file_id} ffmpeg transcode exception: {e}")
-                        write_json_response(
-                            self,
-                            {"error": f"Error durante transcodificación: {str(e)}"},
-                            HTTPStatus.INTERNAL_SERVER_ERROR,
-                        )
+                        # Check if it's a specific ffmpeg error
+                        error_str = str(e).lower()
+                        if "memory" in error_str:
+                            write_json_response(
+                                self,
+                                {"error": "Sin memoria para procesar el video. Intenta con un video más pequeño."},
+                                HTTPStatus.INTERNAL_SERVER_ERROR,
+                            )
+                        else:
+                            write_json_response(
+                                self,
+                                {"error": f"Error durante transcodificación: {str(e)}"},
+                                HTTPStatus.INTERNAL_SERVER_ERROR,
+                            )
                         return
                     finally:
                         # Clean up temporary files
