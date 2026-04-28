@@ -905,6 +905,7 @@ function wrapTextForDisplay(text) {
 
 async function exportCurrentSelection() {
   const file = getSelectedFile();
+  console.log("[EXPORT] Starting export for:", file.name, "Type:", file.kind);
   if (!file) {
     setStatus('Elegí un archivo antes de exportar.', 'warn');
     return;
@@ -916,10 +917,12 @@ async function exportCurrentSelection() {
 
   try {
     const exportAsset = await buildExportBlobForCurrentSelection(file);
+    console.log("[EXPORT] Blob created successfully:", exportAsset.filename, "Size:", exportAsset.blob.size);
     downloadBlob(exportAsset.blob, exportAsset.filename);
     setStatus(`Exportación lista: ${exportAsset.filename}`, 'success');
   } catch (error) {
     setStatus(`Falló la exportación: ${humanizeError(error)}`, 'error');
+    console.error("[EXPORT] Export failed:", error);
   } finally {
     renderSelectionState();
   }
@@ -927,6 +930,7 @@ async function exportCurrentSelection() {
 
 async function buildExportBlobForCurrentSelection(file) {
   // For videos we stream via proxy — no blob needed. For images we need the blob.
+  console.log("[BUILD] Starting build for:", file.name, "Kind:", file.kind);
   if (file.kind === 'image') {
     if (!state.currentPreviewBlob || state.currentPreviewFileId !== file.id) {
       await loadPreview(file);
@@ -1023,13 +1027,16 @@ function buildExportName(file) {
 }
 
 async function exportImageClientSide(options) {
+  console.log("[IMAGE_EXPORT] Starting image export");
   const imageBitmap = await createImageBitmap(state.currentPreviewBlob);
+  console.log("[IMAGE_EXPORT] Preview blob size:", state.currentPreviewBlob?.size);
   const canvas = document.createElement('canvas');
   canvas.width = OUTPUT_WIDTH;
   canvas.height = OUTPUT_HEIGHT;
   const context = canvas.getContext('2d');
 
   drawSceneToCanvas(context, imageBitmap, options);
+  console.log("[IMAGE_EXPORT] Image bitmap created:", imageBitmap.width, "x", imageBitmap.height);
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (!blob) {
@@ -1042,13 +1049,17 @@ async function exportImageClientSide(options) {
 }
 
 async function exportVideoClientSide(options, file) {
+  console.log("[VIDEO_EXPORT] Starting video export");
   if (!window.MediaRecorder) {
+    console.error("[VIDEO_EXPORT] MediaRecorder not supported");
     throw new Error('Este navegador no soporta MediaRecorder para exportar videos.');
   }
 
   const mimeType = pickRecorderMimeType();
+  console.log("[VIDEO_EXPORT] Selected mime type:", mimeType);
   if (!mimeType) {
     throw new Error('Este navegador no soporta exportación de video en WEBM.');
+    console.error("[VIDEO_EXPORT] No supported mime type found");
   }
 
   const video = document.createElement('video');
@@ -1438,6 +1449,7 @@ async function publishToTikTok() {
 
   try {
     const exportAsset = await buildExportBlobForCurrentSelection(file);
+    console.log("[EXPORT] Blob created successfully:", exportAsset.filename, "Size:", exportAsset.blob.size);
     const payload = {
       postMode: elements.tiktokPostModeInput.value,
       title: composeTikTokTitle(),
