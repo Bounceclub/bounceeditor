@@ -957,9 +957,16 @@ class BounceHandler(SimpleHTTPRequestHandler):
             logger.error(f"Error proxying {file_id}: {str(e)}")
 
     def handle_save_config(self):
-        payload = parse_json_body(self)
-        saved = save_public_config(payload)
-        write_json_response(self, {"publicConfig": saved})
+        try:
+            payload = parse_json_body(self)
+            saved = save_public_config(payload)
+            write_json_response(self, {"publicConfig": saved})
+        except json.JSONDecodeError as e:
+            write_json_response(self, {"error": f"Invalid JSON: {str(e)}"}, HTTPStatus.BAD_REQUEST)
+            return
+        except Exception as e:  # noqa: BLE001
+            write_json_response(self, {"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
 
     def handle_tiktok_oauth_start(self):
         runtime = get_tiktok_runtime(self)
