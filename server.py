@@ -1115,6 +1115,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
         logger.info(f"[PROXY] file_id={file_id} starting proxy request")
         try:
             token = get_google_access_token()
+            logger.info(f"[PROXY] file_id={file_id} Got Google access token")
             drive_url = f"{GOOGLE_DRIVE_FILES_URL}/{file_id}?alt=media&supportsAllDrives=true"
 
             range_header = self.headers.get("Range", "")
@@ -1122,6 +1123,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
             if range_header:
                 upstream_headers["Range"] = range_header
 
+            logger.info(f"[PROXY] file_id={file_id} Requesting from Drive: {drive_url}")
             req = urllib.request.Request(drive_url, headers=upstream_headers)
             with urllib.request.urlopen(req, timeout=120) as resp:
                 status = resp.status
@@ -1151,6 +1153,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                     # ── Transcode path ─────────────────────────────────────
                     # Note: We ignore range headers for transcoding since we need to process the entire file
                     # The browser will handle seeking on the transcoded output
+                    logger.info(f"[PROXY] file_id={file_id} Starting transcoding path")
                     tmp_in = tempfile.NamedTemporaryFile(suffix=".input", delete=False)
                     tmp_in_path = tmp_in.name
                     tmp_out_path = None
