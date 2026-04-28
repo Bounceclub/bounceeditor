@@ -1243,21 +1243,26 @@ class BounceHandler(SimpleHTTPRequestHandler):
                     self.send_header("Content-Range", content_range)
                 self.end_headers()
 
-                while True:
-                    chunk = resp.read(CHUNK)
-                    if not chunk:
-                        break
-                    try:
-                        self.wfile.write(chunk)
-                    except (BrokenPipeError, ConnectionResetError):
-                        break
+                try:
+                    while True:
+                        chunk = resp.read(CHUNK)
+                        if not chunk:
+                            break
+                        try:
+                            self.wfile.write(chunk)
+                        except (BrokenPipeError, ConnectionResetError):
+                            break
+                except Exception as stream_error:
+                    logger.error(f"Error during streaming: {stream_error}")
+                    # Can't send error response after headers sent
+                    return
 
         except urllib.error.HTTPError as e:
             logger.error(f"HTTPError proxying {file_id}: {e.code} - {e.reason}")
             write_json_response(self, {"error": f"Drive error {e.code}: {e.reason}"}, HTTPStatus.BAD_GATEWAY)
         except Exception as e:  # noqa: BLE001
-            write_json_response(self, {"error": str(e)}, HTTPStatus.BAD_GATEWAY)
             logger.error(f"Error proxying {file_id}: {str(e)}")
+            write_json_response(self, {"error": str(e)}, HTTPStatus.BAD_GATEWAY)
 
     def handle_drive_thumbnail(self, file_id: str):
         """Serve Drive thumbnails with proper CORS headers."""
@@ -1323,9 +1328,9 @@ class BounceHandler(SimpleHTTPRequestHandler):
                         self.wfile.write(chunk)
                     except (BrokenPipeError, ConnectionResetError):
                         break
-        except Exception as e:
-            logger.error(f"Error serving thumbnail for {file_id}: {e}")
-            # Return placeholder on error
+        except urllib.error.HTTPError as e:
+            logger.error(f"HTTPError fetching thumbnail {file_id}: {e.code} - {e.reason}")
+            # Return placeholder on HTTP error
             placeholder_png = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\x0d\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
 
             self.send_response(HTTPStatus.OK)
@@ -1335,13 +1340,18 @@ class BounceHandler(SimpleHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(placeholder_png)
-
-        except urllib.error.HTTPError as e:
-            logger.error(f"HTTPError fetching thumbnail {file_id}: {e.code} - {e.reason}")
-            write_json_response(self, {"error": f"Drive error {e.code}: {e.reason}"}, HTTPStatus.BAD_GATEWAY)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.error(f"Error fetching thumbnail {file_id}: {str(e)}")
-            write_json_response(self, {"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            # Return placeholder on any other error
+            placeholder_png = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\x0d\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(placeholder_png)))
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(placeholder_png)
 
     def handle_save_config(self):
         try:
