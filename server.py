@@ -1145,8 +1145,10 @@ class BounceHandler(SimpleHTTPRequestHandler):
 
                 logger.info(f"[PROXY] file_id={file_id} content_type={content_type} needs_transcode={needs_transcode} ffmpeg={ffmpeg_bin}")
 
-                if needs_transcode and ffmpeg_bin and not range_header:
+                if needs_transcode and ffmpeg_bin:
                     # ── Transcode path ─────────────────────────────────────
+                    # Note: We ignore range headers for transcoding since we need to process the entire file
+                    # The browser will handle seeking on the transcoded output
                     tmp_in = tempfile.NamedTemporaryFile(suffix=".input", delete=False)
                     tmp_in_path = tmp_in.name
                     tmp_out_path = None
@@ -1181,14 +1183,16 @@ class BounceHandler(SimpleHTTPRequestHandler):
                         ffmpeg_cmd = [
                             ffmpeg_bin, "-y", "-i", tmp_in_path,
                             # Video codec settings for better compatibility
-                            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+                            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
                             # Ensure proper pixel format for web compatibility
                             "-pix_fmt", "yuv420p",
+                            # Ensure proper color space
+                            "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
                             # Audio codec
                             "-c:a", "aac", "-b:a", "128k",
                             # MP4 optimization for streaming
                             "-movflags", "+faststart",
-                            # Ensure proper frame rate
+                            # Ensure proper frame rate (use source frame rate if available)
                             "-r", "30",
                         ] + duration_limit + [tmp_out_path]
 
