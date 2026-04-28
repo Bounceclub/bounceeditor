@@ -1,1 +1,7 @@
+# Bounce Editor Dependencies
+
+# Image processing for thumbnail generation
+Pillow>=12.0.0
+
+# FFmpeg wrapper (optional - for systems without ffmpeg in PATH)
 imageio-ffmpeg>=0.5.1
