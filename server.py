@@ -1100,6 +1100,8 @@ class BounceHandler(SimpleHTTPRequestHandler):
             "video/quicktime", "video/x-msvideo", "video/x-ms-wmv",
             "video/x-matroska", "video/x-flv", "video/3gpp", "video/3gpp2",
             "video/x-f4v", "video/f4v", "application/f4v",  # Added F4V support
+            "video/mp4",  # Also transcode MP4 to ensure compatibility
+            "video/x-m4v", "video/x-m4p",  # Additional MOV variants
         }
 
         file_id = path.removeprefix("/api/drive/proxy/").split("?")[0].strip()
@@ -1130,7 +1132,7 @@ class BounceHandler(SimpleHTTPRequestHandler):
                 accept_ranges = resp.headers.get("Accept-Ranges", "bytes")
 
                 needs_transcode = content_type in TRANSCODE_TYPES
-                logger.info(f"[PROXY] file_id={file_id} needs_transcode={needs_transcode}")
+                logger.info(f"[PROXY] file_id={file_id} content_type={content_type} needs_transcode={needs_transcode} TRANSCODE_TYPES={TRANSCODE_TYPES}")
 
                 # Try to get ffmpeg binary
                 ffmpeg_bin = None
