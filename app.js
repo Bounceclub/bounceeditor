@@ -871,7 +871,9 @@ function showPreview(file, previewToken) {
   console.log("[PREVIEW] showPreview called for:", file.name, "kind:", file.kind, "url:", state.currentPreviewUrl);
   if (file.kind === 'image') {
     console.log("[PREVIEW] Showing image preview");
+    console.log("[PREVIEW] Hiding video and placeholder");
     elements.previewPlaceholder.hidden = true;
+    elements.previewPlaceholder.style.display = 'none';
     elements.previewVideo.pause();
     elements.previewVideo.hidden = true;
     elements.previewVideo.removeAttribute('src');
@@ -882,6 +884,7 @@ function showPreview(file, previewToken) {
       console.error("[PREVIEW] Image src:", this.src);
       console.error("[PREVIEW] Image error:", this.error);
       elements.previewPlaceholder.hidden = false;
+      elements.previewPlaceholder.style.display = 'grid';
       elements.previewPlaceholder.textContent = 'No se pudo cargar la imagen.';
       setStatus('No se pudo cargar la imagen.', 'error');
     };
@@ -892,6 +895,36 @@ function showPreview(file, previewToken) {
       console.log("[PREVIEW] Image display:", this.style.display);
       console.log("[PREVIEW] Image visibility:", this.style.visibility);
       console.log("[PREVIEW] Image hidden attribute:", this.hidden);
+      console.log("[PREVIEW] Image z-index:", this.style.zIndex);
+      console.log("[PREVIEW] Placeholder hidden:", elements.previewPlaceholder.hidden);
+      console.log("[PREVIEW] Placeholder display:", elements.previewPlaceholder.style.display);
+      console.log("[PREVIEW] Video hidden:", elements.previewVideo.hidden);
+      console.log("[PREVIEW] Preview stage:", elements.previewStage);
+      console.log("[PREVIEW] Preview stage children:", elements.previewStage.children.length);
+
+      // Check computed styles
+      const computedStyle = window.getComputedStyle(this);
+      console.log("[PREVIEW] Computed display:", computedStyle.display);
+      console.log("[PREVIEW] Computed visibility:", computedStyle.visibility);
+      console.log("[PREVIEW] Computed opacity:", computedStyle.opacity);
+      console.log("[PREVIEW] Computed position:", computedStyle.position);
+      console.log("[PREVIEW] Computed width:", computedStyle.width);
+      console.log("[PREVIEW] Computed height:", computedStyle.height);
+      console.log("[PREVIEW] Computed top:", computedStyle.top);
+      console.log("[PREVIEW] Computed left:", computedStyle.left);
+      console.log("[PREVIEW] Computed z-index:", computedStyle.zIndex);
+
+      // Check if image is actually visible in viewport
+      const rect = this.getBoundingClientRect();
+      console.log("[PREVIEW] Image bounding rect:", rect);
+      console.log("[PREVIEW] Image in viewport:", rect.width > 0 && rect.height > 0);
+
+      // Check preview stage computed styles
+      const stageStyle = window.getComputedStyle(elements.previewStage);
+      console.log("[PREVIEW] Stage overflow:", stageStyle.overflow);
+      console.log("[PREVIEW] Stage position:", stageStyle.position);
+      console.log("[PREVIEW] Stage width:", stageStyle.width);
+      console.log("[PREVIEW] Stage height:", stageStyle.height);
     };
 
     elements.previewImage.src = state.currentPreviewUrl;
@@ -903,11 +936,14 @@ function showPreview(file, previewToken) {
     elements.previewImage.style.width = '100%';
     elements.previewImage.style.height = '100%';
     elements.previewImage.style.objectFit = 'cover';
-    elements.previewImage.style.zIndex = '1';
+    elements.previewImage.style.zIndex = '10';
+    // Temporary background color to debug visibility
+    elements.previewImage.style.backgroundColor = 'red';
     console.log("[PREVIEW] Image preview set, hidden:", elements.previewImage.hidden);
     console.log("[PREVIEW] Image src:", state.currentPreviewUrl);
     console.log("[PREVIEW] Image display style:", elements.previewImage.style.display);
     console.log("[PREVIEW] Image visibility style:", elements.previewImage.style.visibility);
+    console.log("[PREVIEW] Image z-index style:", elements.previewImage.style.zIndex);
   } else {
     console.log("[PREVIEW] Showing video preview");
     elements.previewImage.hidden = true;
