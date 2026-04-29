@@ -809,7 +809,8 @@ async function loadPreview(file, { force = false } = {}) {
   const token = ++state.currentPreviewToken;
 
   // For videos: reuse if same file and not forced
-  if (!force && state.currentPreviewFileId === file.id && state.currentPreviewUrl) {
+  // For images: always reload to ensure fresh content
+  if (!force && file.kind === 'video' && state.currentPreviewFileId === file.id && state.currentPreviewUrl) {
     showPreview(file);
     return;
   }
@@ -836,22 +837,12 @@ async function loadPreview(file, { force = false } = {}) {
     state.currentPreviewBlob = null;
     showPreview(file, token);
   } else {
-    // Images: download as blob (small files, no streaming needed)
-    try {
-      const blob = await fetchDriveBlob(file);
-      if (token !== state.currentPreviewToken) return;
-      state.currentPreviewUrl = URL.createObjectURL(blob);
-      state.currentPreviewBlob = blob;
-      state.currentPreviewFileId = file.id;
-      showPreview(file);
-      setStatus(`Preview listo para "${file.name}".`, 'success');
-    } catch (error) {
-      if (token !== state.currentPreviewToken) return;
-      clearCurrentPreview();
-      elements.previewPlaceholder.hidden = false;
-      elements.previewPlaceholder.textContent = 'No pude cargar el preview.';
-      setStatus(`No pude cargar el preview: ${humanizeError(error)}`, 'error');
-    }
+    // Images: use direct server URL instead of blob URL for better compatibility
+    state.currentPreviewUrl = `/api/drive/proxy/${file.id}`;
+    state.currentPreviewFileId = file.id;
+    state.currentPreviewBlob = null;
+    showPreview(file);
+    setStatus(`Preview listo para "${file.name}".`, 'success');
   }
 }
 
@@ -1031,7 +1022,8 @@ function showPreview(file, previewToken) {
 }
 
 function clearCurrentPreview() {
-  if (state.currentPreviewUrl) {
+  // Only revoke blob URLs, not server URLs
+  if (state.currentPreviewUrl && state.currentPreviewUrl.startsWith('blob:')) {
     URL.revokeObjectURL(state.currentPreviewUrl);
   }
 
@@ -1045,8 +1037,6 @@ function clearCurrentPreview() {
   elements.previewVideo.removeAttribute('src');
   elements.playVideoButton.hidden = true;  // Hide manual play button
   elements.overlayPreview.hidden = true;
-
-
 }
 function syncOverlayControls() {
   const fontSize = Number(elements.fontSizeInput.value);
@@ -1102,12 +1092,12 @@ async function buildExportBlobForCurrentSelection(file) {
   // For videos we stream via proxy — no blob needed. For images we need the blob.
   console.log("[BUILD] Starting build for:", file.name, "Kind:", file.kind);
   if (file.kind === 'image') {
-    if (!state.currentPreviewBlob || state.currentPreviewFileId !== file.id) {
-      await loadPreview(file);
-    }
-    if (!state.currentPreviewBlob) {
+    // Download image as blob for export
+    const blob = await fetchDriveBlob(file);
+    if (!blob) {
       throw new Error('No pude conseguir la imagen para exportar.');
     }
+    state.currentPreviewBlob = blob;
   } else {
     // Video: make sure preview URL is set
     if (!state.currentPreviewUrl || state.currentPreviewFileId !== file.id) {
