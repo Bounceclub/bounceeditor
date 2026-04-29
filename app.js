@@ -879,6 +879,8 @@ function showPreview(file, previewToken) {
     // Add error handler for image loading
     elements.previewImage.onerror = function() {
       console.error("[PREVIEW] Image failed to load");
+      console.error("[PREVIEW] Image src:", this.src);
+      console.error("[PREVIEW] Image error:", this.error);
       elements.previewPlaceholder.hidden = false;
       elements.previewPlaceholder.textContent = 'No se pudo cargar la imagen.';
       setStatus('No se pudo cargar la imagen.', 'error');
@@ -886,11 +888,26 @@ function showPreview(file, previewToken) {
 
     elements.previewImage.onload = function() {
       console.log("[PREVIEW] Image loaded successfully");
+      console.log("[PREVIEW] Image naturalWidth:", this.naturalWidth, "naturalHeight:", this.naturalHeight);
+      console.log("[PREVIEW] Image display:", this.style.display);
+      console.log("[PREVIEW] Image visibility:", this.style.visibility);
+      console.log("[PREVIEW] Image hidden attribute:", this.hidden);
     };
 
     elements.previewImage.src = state.currentPreviewUrl;
     elements.previewImage.hidden = false;
+    elements.previewImage.style.display = 'block';
+    elements.previewImage.style.visibility = 'visible';
+    elements.previewImage.style.position = 'absolute';
+    elements.previewImage.style.inset = '0';
+    elements.previewImage.style.width = '100%';
+    elements.previewImage.style.height = '100%';
+    elements.previewImage.style.objectFit = 'cover';
+    elements.previewImage.style.zIndex = '1';
     console.log("[PREVIEW] Image preview set, hidden:", elements.previewImage.hidden);
+    console.log("[PREVIEW] Image src:", state.currentPreviewUrl);
+    console.log("[PREVIEW] Image display style:", elements.previewImage.style.display);
+    console.log("[PREVIEW] Image visibility style:", elements.previewImage.style.visibility);
   } else {
     console.log("[PREVIEW] Showing video preview");
     elements.previewImage.hidden = true;
