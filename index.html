@@ -303,7 +303,7 @@
           <div class="account-card">
             <div class="account-head">
               <strong id="tiktokAccountLabel">Sin cuenta conectada</strong>
-              <span class="mini-badge" id="tiktokModeBadge">Video only</span>
+              <span class="mini-badge" id="tiktokModeBadge">Video, Imagen y Carrusel</span>
             </div>
             <p id="tiktokChecklist" class="muted-block">
               Configurá TikTok en <code>studio-secrets.json</code> y usá un dominio HTTPS para habilitar OAuth web.
@@ -313,6 +313,25 @@
               <button id="refreshTikTokButton" class="button ghost">Actualizar estado</button>
               <button id="disconnectTikTokButton" class="button ghost">Desconectar</button>
             </div>
+          </div>
+
+          <label class="field">
+            <span>Tipo de contenido</span>
+            <select id="tiktokContentTypeInput">
+              <option value="video">Video</option>
+              <option value="image">Imagen</option>
+              <option value="carousel">Carrusel (2-5 imágenes)</option>
+            </select>
+          </label>
+
+          <div id="carouselSelector" class="carousel-selector" style="display: none;">
+            <span class="field-label">Seleccionar imágenes para carrusel (máximo 5):</span>
+            <div id="carouselThumbnails" class="carousel-thumbnails">
+              <div class="carousel-placeholder">
+                Seleccioná 2-5 imágenes de la biblioteca para el carrusel
+              </div>
+            </div>
+            <button id="clearCarouselButton" class="button ghost" style="margin-top: 10px;">Limpiar selección</button>
           </div>
 
           <label class="field">

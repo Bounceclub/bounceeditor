@@ -37,8 +37,9 @@ TIKTOK_USER_INFO_URL = "https://open.tiktokapis.com/v2/user/info/"
 TIKTOK_CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/"
 TIKTOK_DIRECT_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/"
 TIKTOK_UPLOAD_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/"
+TIKTOK_IMAGE_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/image/init/"
 TIKTOK_STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/"
-TIKTOK_SCOPES = ["user.info.basic", "video.upload", "video.publish"]
+TIKTOK_SCOPES = ["user.info.basic", "video.upload", "video.publish", "image.upload", "image.publish"]
 PUBLIC_CONFIG_DEFAULTS = {
     "teamName": "Bounce",
     "googleClientId": "",
@@ -942,6 +943,120 @@ def upload_video_to_tiktok(runtime: dict, token_bundle: dict, payload: dict, fil
     }
 
 
+def upload_image_to_tiktok(runtime: dict, token_bundle: dict, payload: dict, file_info: dict) -> dict:
+    """Upload a single image to TikTok."""
+    file_bytes = file_info["data"]
+    file_size = len(file_bytes)
+    if file_size <= 0:
+        raise RuntimeError("El archivo de imagen está vacío.")
+
+    mime_type = (file_info.get("content_type") or "image/jpeg").split(";")[0]
+
+    # Initialize image upload
+    init_payload = {
+        "post_info": {
+            "title": normalize_title(payload),
+            "privacy_level": str(payload.get("privacyLevel", "")).strip(),
+            "disable_duet": not bool(payload.get("allowDuet", False)),
+            "disable_comment": not bool(payload.get("allowComment", False)),
+            "disable_stitch": not bool(payload.get("allowStitch", False)),
+            "brand_content_toggle": bool(payload.get("brandContentToggle", False)),
+            "brand_organic_toggle": bool(payload.get("brandOrganicToggle", False)),
+        }
+    }
+
+    init_response = tiktok_authorized_json(runtime, token_bundle, TIKTOK_IMAGE_INIT_URL, init_payload)
+    upload_url = init_response.get("data", {}).get("upload_url", "")
+    publish_id = init_response.get("data", {}).get("publish_id", "")
+
+    if not upload_url or not publish_id:
+        raise RuntimeError("TikTok no devolvió upload_url/publish_id para imagen.")
+
+    # Upload the image
+    http_upload_binary(upload_url, file_bytes, mime_type)
+
+    # Check status
+    status_payload = {}
+    try:
+        status_payload = fetch_publish_status(runtime, token_bundle, publish_id)
+    except Exception:  # noqa: BLE001
+        status_payload = {}
+
+    return {
+        "publishId": publish_id,
+        "postMode": "DIRECT_POST",
+        "titleApplied": normalize_title(payload),
+        "status": status_payload.get("data", {}),
+        "rawStatus": status_payload,
+    }
+
+
+def upload_carousel_to_tiktok(runtime: dict, token_bundle: dict, payload: dict, files_info: list) -> dict:
+    """Upload a carousel (multiple images) to TikTok."""
+    if not files_info or len(files_info) == 0:
+        raise RuntimeError("No se proporcionaron imágenes para el carrusel.")
+
+    if len(files_info) > 5:
+        raise RuntimeError("Máximo 5 imágenes permitidas para carrusel de TikTok.")
+
+    # Initialize carousel upload
+    carousel_images = []
+    for i, file_info in enumerate(files_info):
+        file_bytes = file_info["data"]
+        file_size = len(file_bytes)
+        if file_size <= 0:
+            raise RuntimeError(f"La imagen {i+1} está vacía.")
+
+        mime_type = (file_info.get("content_type") or "image/jpeg").split(";")[0]
+
+        # Initialize each image upload
+        image_init_payload = {
+            "post_info": {
+                "title": normalize_title(payload),
+                "privacy_level": str(payload.get("privacyLevel", "")).strip(),
+                "disable_duet": not bool(payload.get("allowDuet", False)),
+                "disable_comment": not bool(payload.get("allowComment", False)),
+                "disable_stitch": not bool(payload.get("allowStitch", False)),
+                "brand_content_toggle": bool(payload.get("brandContentToggle", False)),
+                "brand_organic_toggle": bool(payload.get("brandOrganicToggle", False)),
+            }
+        }
+
+        image_init_response = tiktok_authorized_json(runtime, token_bundle, TIKTOK_IMAGE_INIT_URL, image_init_payload)
+        upload_url = image_init_response.get("data", {}).get("upload_url", "")
+        image_publish_id = image_init_response.get("data", {}).get("publish_id", "")
+
+        if not upload_url or not image_publish_id:
+            raise RuntimeError(f"TikTok no devolvió upload_url/publish_id para imagen {i+1}.")
+
+        # Upload the image
+        http_upload_binary(upload_url, file_bytes, mime_type)
+
+        carousel_images.append({
+            "publish_id": image_publish_id,
+            "index": i
+        })
+
+    # Use the first image's publish_id as the main publish_id
+    main_publish_id = carousel_images[0]["publish_id"]
+
+    # Check status
+    status_payload = {}
+    try:
+        status_payload = fetch_publish_status(runtime, token_bundle, main_publish_id)
+    except Exception:  # noqa: BLE001
+        status_payload = {}
+
+    return {
+        "publishId": main_publish_id,
+        "postMode": "DIRECT_POST",
+        "titleApplied": normalize_title(payload),
+        "carouselImages": len(carousel_images),
+        "status": status_payload.get("data", {}),
+        "rawStatus": status_payload,
+    }
+
+
 class BounceHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
@@ -1596,8 +1711,9 @@ class BounceHandler(SimpleHTTPRequestHandler):
 
         body = self.rfile.read(content_length)
         fields, files = parse_multipart(content_type, body)
-        if "payload" not in fields or "file" not in files:
-            write_json_response(self, {"error": "Falta payload o file."}, HTTPStatus.BAD_REQUEST)
+
+        if "payload" not in fields:
+            write_json_response(self, {"error": "Falta payload."}, HTTPStatus.BAD_REQUEST)
             return
 
         try:
@@ -1606,27 +1722,95 @@ class BounceHandler(SimpleHTTPRequestHandler):
             write_json_response(self, {"error": "Payload de TikTok inválido."}, HTTPStatus.BAD_REQUEST)
             return
 
-        file_info = files["file"]
-        mime_type = (file_info.get("content_type") or "").split(";")[0]
-        if not mime_type.startswith("video/"):
+        # Determine content type
+        content_type_mode = payload.get("contentType", "video").lower()
+
+        # Handle different content types
+        if content_type_mode == "video":
+            if "file" not in files:
+                write_json_response(self, {"error": "Falta archivo de video."}, HTTPStatus.BAD_REQUEST)
+                return
+
+            file_info = files["file"]
+            mime_type = (file_info.get("content_type") or "").split(";")[0]
+            if not mime_type.startswith("video/"):
+                write_json_response(
+                    self,
+                    {"error": "El archivo debe ser un video para el modo video."},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+        elif content_type_mode == "image":
+            if "file" not in files:
+                write_json_response(self, {"error": "Falta archivo de imagen."}, HTTPStatus.BAD_REQUEST)
+                return
+
+            file_info = files["file"]
+            mime_type = (file_info.get("content_type") or "").split(";")[0]
+            if not mime_type.startswith("image/"):
+                write_json_response(
+                    self,
+                    {"error": "El archivo debe ser una imagen para el modo imagen."},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+        elif content_type_mode == "carousel":
+            # For carousel, we expect multiple files named "file_0", "file_1", etc.
+            carousel_files = []
+            for i in range(5):  # Maximum 5 images
+                file_key = f"file_{i}"
+                if file_key in files:
+                    file_info = files[file_key]
+                    mime_type = (file_info.get("content_type") or "").split(";")[0]
+                    if not mime_type.startswith("image/"):
+                        write_json_response(
+                            self,
+                            {"error": f"El archivo {i+1} debe ser una imagen para carrusel."},
+                            HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    carousel_files.append(file_info)
+
+            if len(carousel_files) < 2:
+                write_json_response(
+                    self,
+                    {"error": "Un carrusel necesita al menos 2 imágenes (máximo 5)."},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+        else:
             write_json_response(
                 self,
-                {"error": "La integración actual de TikTok desde esta web soporta video solamente."},
+                {"error": f"Tipo de contenido no válido: {content_type_mode}. Debe ser 'video', 'image' o 'carousel'."},
                 HTTPStatus.BAD_REQUEST,
             )
             return
 
-        if not bool(payload.get("musicConsent", False)):
+        # Music consent is only required for videos
+        if content_type_mode == "video" and not bool(payload.get("musicConsent", False)):
             write_json_response(
                 self,
-                {"error": 'TikTok exige consentimiento explícito. Marcá "Music Usage Confirmation".'},
+                {"error": 'TikTok exige consentimiento explícito para videos. Marcá "Music Usage Confirmation".'},
                 HTTPStatus.BAD_REQUEST,
             )
             return
 
         try:
             token_bundle = ensure_access_token(runtime)
-            result = upload_video_to_tiktok(runtime, token_bundle, payload, file_info)
+
+            # Call appropriate upload function based on content type
+            if content_type_mode == "video":
+                result = upload_video_to_tiktok(runtime, token_bundle, payload, file_info)
+            elif content_type_mode == "image":
+                result = upload_image_to_tiktok(runtime, token_bundle, payload, file_info)
+            elif content_type_mode == "carousel":
+                result = upload_carousel_to_tiktok(runtime, token_bundle, payload, carousel_files)
+            else:
+                raise RuntimeError(f"Tipo de contenido no soportado: {content_type_mode}")
+
             write_json_response(self, {"ok": True, "result": result})
         except Exception as error:  # noqa: BLE001
             write_json_response(self, {"error": str(error)}, HTTPStatus.BAD_REQUEST)

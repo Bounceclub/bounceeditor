@@ -23,6 +23,7 @@ const state = {
   mobilePanel: 'setup',
   tiktokStatus: null,
   currentPublishing: false,
+  carouselFiles: [], // Array of file IDs for carousel
 };
 
 const elements = {
@@ -98,6 +99,10 @@ const elements = {
   brandContentCheckbox: document.getElementById('brandContentCheckbox'),
   musicConsentCheckbox: document.getElementById('musicConsentCheckbox'),
   tiktokModeHint: document.getElementById('tiktokModeHint'),
+  tiktokContentTypeInput: document.getElementById('tiktokContentTypeInput'),
+  carouselSelector: document.getElementById('carouselSelector'),
+  carouselThumbnails: document.getElementById('carouselThumbnails'),
+  clearCarouselButton: document.getElementById('clearCarouselButton'),
   publishTikTokButton: document.getElementById('publishTikTokButton'),
   tiktokPublishResult: document.getElementById('tiktokPublishResult'),
   mobileNav: document.getElementById('mobileNav'),
@@ -210,6 +215,8 @@ function bindEvents() {
     renderTikTokModeHint();
     renderTikTokStatus();
   });
+  elements.tiktokContentTypeInput.addEventListener('change', handleContentTypeChange);
+  elements.clearCarouselButton.addEventListener('click', clearCarouselSelection);
   elements.tiktokPrivacyInput.addEventListener('change', renderSelectionState);
   elements.tiktokCaptionInput.addEventListener('input', renderSelectionState);
   elements.tiktokHashtagsInput.addEventListener('input', renderSelectionState);
@@ -681,12 +688,22 @@ function renderLibrary() {
     card.type = 'button';
     card.className = `media-card ${file.kind}${file.id === state.selectedFileId ? ' active' : ''}`;
     card.dataset.fileId = file.id;
+
+    // Check if this file is in carousel
+    const isInCarousel = state.carouselFiles.includes(file.id);
+    const contentType = elements.tiktokContentTypeInput.value;
+
     card.innerHTML = `
       <div class="card-thumbnail">
-        <img src="/api/drive/thumbnail/${file.id}" 
-             alt="${escapeHtml(file.name)}" 
+        <img src="/api/drive/thumbnail/${file.id}"
+             alt="${escapeHtml(file.name)}"
              loading="lazy"
              onerror="this.style.display='none'; this.parentElement.classList.add('no-thumbnail');">
+        ${file.kind === 'image' && contentType === 'carousel' ? `
+          <button class="card-carousel-btn ${isInCarousel ? 'in-carousel' : ''}" data-action="carousel" title="${isInCarousel ? 'En carrusel' : 'Agregar al carrusel'}">
+            ${isInCarousel ? '✓' : '+'}
+          </button>
+        ` : ''}
       </div>
       <div class="card-topline">
         <span class="media-kind">${file.kind === 'video' ? 'VIDEO' : 'IMAGEN'}</span>
@@ -699,6 +716,20 @@ function renderLibrary() {
         <span>${file.kind === 'video' ? formatDuration(file.durationMs) : 'Foto'}</span>
       </div>
     `;
+
+    // Handle carousel button clicks separately
+    const carouselBtn = card.querySelector('.card-carousel-btn');
+    if (carouselBtn) {
+      carouselBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (isInCarousel) {
+          removeFromCarousel(file.id);
+        } else {
+          addToCarousel(file.id);
+        }
+      });
+    }
+
     card.addEventListener('click', () => {
       void selectFile(file);
     });
@@ -1543,21 +1574,68 @@ function syncTikTokPublishAvailability() {
   const status = state.tiktokStatus || {};
   const isDirectMode = elements.tiktokPostModeInput.value === 'DIRECT_POST';
   const privacyChosen = Boolean(elements.tiktokPrivacyInput.value);
-  const canPublish = Boolean(
-    file &&
+  const contentType = elements.tiktokContentTypeInput.value;
+
+  // Determine if we can publish based on content type
+  let canPublish = false;
+
+  if (contentType === 'carousel') {
+    // For carousel: need 2-5 images, TikTok connected, and consent checked
+    const hasValidCarousel = state.carouselFiles.length >= 2 && state.carouselFiles.length <= 5;
+    canPublish = Boolean(
+      hasValidCarousel &&
+      status.connected &&
+      !state.currentPublishing &&
+      elements.musicConsentCheckbox.checked &&
+      (!isDirectMode || privacyChosen)
+    );
+  } else if (contentType === 'image') {
+    // For single image: need one image, TikTok connected, and consent checked
+    canPublish = Boolean(
+      file &&
+      file.kind === 'image' &&
+      status.connected &&
+      !state.currentPublishing &&
+      elements.musicConsentCheckbox.checked &&
+      (!isDirectMode || privacyChosen)
+    );
+  } else {
+    // For video: need one video, TikTok connected, and consent checked
+    canPublish = Boolean(
+      file &&
       file.kind === 'video' &&
       status.connected &&
       !state.currentPublishing &&
       elements.musicConsentCheckbox.checked &&
       (!isDirectMode || privacyChosen)
-  );
+    );
+  }
 
   elements.connectTikTokButton.disabled = !status.configured || !status.oauthReady;
   elements.disconnectTikTokButton.disabled = !status.connected;
   elements.publishTikTokButton.disabled = !canPublish;
 
-  if (file?.kind === 'image') {
-    setTikTokResult('La publicación directa a TikTok desde esta web está enfocada en videos. Para fotos/carruseles hace falta trabajar con URLs verificadas por dominio.', 'warn');
+  // Update result message based on content type
+  if (contentType === 'carousel') {
+    if (state.carouselFiles.length < 2) {
+      setTikTokResult('Seleccioná 2-5 imágenes de la biblioteca para crear un carrusel.', 'info');
+    } else if (!status.connected) {
+      setTikTokResult('Conectá tu cuenta de TikTok para publicar carruseles.', 'warn');
+    } else {
+      setTikTokResult(`Carrusel listo con ${state.carouselFiles.length} imágenes.`, 'info');
+    }
+  } else if (contentType === 'image') {
+    if (!file || file.kind !== 'image') {
+      setTikTokResult('Elegí una imagen de la biblioteca para publicar.', 'info');
+    } else if (!status.connected) {
+      setTikTokResult('Conectá tu cuenta de TikTok para publicar imágenes.', 'warn');
+    } else {
+      setTikTokResult('Imagen lista para publicar en TikTok.', 'info');
+    }
+  } else {
+    if (file?.kind === 'image') {
+      setTikTokResult('La publicación directa a TikTok desde esta web está enfocada en videos. Para fotos/carruseles hace falta trabajar con URLs verificadas por dominio.', 'warn');
+    }
   }
 }
 
@@ -1593,10 +1671,24 @@ async function publishToTikTok() {
   const file = getSelectedFile();
   const status = state.tiktokStatus || {};
   const isDirectMode = elements.tiktokPostModeInput.value === 'DIRECT_POST';
+  const contentType = elements.tiktokContentTypeInput.value;
 
-  if (!file || file.kind !== 'video') {
-    setTikTokResult('Elegí un video antes de subir a TikTok.', 'warn');
-    return;
+  // Validate based on content type
+  if (contentType === 'carousel') {
+    if (state.carouselFiles.length < 2 || state.carouselFiles.length > 5) {
+      setTikTokResult('Para carrusel necesitás 2-5 imágenes.', 'warn');
+      return;
+    }
+  } else if (contentType === 'image') {
+    if (!file || file.kind !== 'image') {
+      setTikTokResult('Elegí una imagen antes de subir a TikTok.', 'warn');
+      return;
+    }
+  } else {
+    if (!file || file.kind !== 'video') {
+      setTikTokResult('Elegí un video antes de subir a TikTok.', 'warn');
+      return;
+    }
   }
 
   if (!status.connected) {
@@ -1614,21 +1706,10 @@ async function publishToTikTok() {
     return;
   }
 
-  if (status.maxVideoPostDurationSec && file.durationMs) {
-    const durationSec = Math.ceil(file.durationMs / 1000);
-    if (durationSec > status.maxVideoPostDurationSec) {
-      setTikTokResult(`Este video dura ${durationSec}s y la cuenta hoy tiene un máximo de ${status.maxVideoPostDurationSec}s.`, 'warn');
-      return;
-    }
-  }
-
   state.currentPublishing = true;
   syncTikTokPublishAvailability();
-  setTikTokResult(`Procesando "${file.name}" para TikTok...`, 'info');
 
   try {
-    const exportAsset = await buildExportBlobForCurrentSelection(file);
-    console.log("[EXPORT] Blob created successfully:", exportAsset.filename, "Size:", exportAsset.blob.size);
     const payload = {
       postMode: elements.tiktokPostModeInput.value,
       title: composeTikTokTitle(),
@@ -1640,12 +1721,55 @@ async function publishToTikTok() {
       brandContentToggle: elements.brandContentCheckbox.checked,
       musicConsent: elements.musicConsentCheckbox.checked,
       videoCoverTimestampMs: Math.max(0, Math.round(Number(elements.tiktokCoverTimestampInput.value || 0) * 1000)),
-      durationSec: file.durationMs ? Math.ceil(file.durationMs / 1000) : 0,
+      durationSec: file?.durationMs ? Math.ceil(file.durationMs / 1000) : 0,
+      contentType: contentType,
     };
 
     const formData = new FormData();
     formData.append('payload', JSON.stringify(payload));
-    formData.append('file', exportAsset.blob, exportAsset.filename);
+
+    if (contentType === 'carousel') {
+      // For carousel, upload multiple images
+      setTikTokResult('Procesando imágenes para carrusel...', 'info');
+
+      for (let i = 0; i < state.carouselFiles.length; i++) {
+        const fileId = state.carouselFiles[i];
+        const carouselFile = state.files.find(f => f.id === fileId);
+        if (!carouselFile) continue;
+
+        setTikTokResult(`Procesando imagen ${i + 1} de ${state.carouselFiles.length}...`, 'info');
+
+        // Get the image blob
+        let imageBlob;
+        if (state.currentPreviewBlob && state.currentPreviewFileId === fileId) {
+          imageBlob = state.currentPreviewBlob;
+        } else {
+          const response = await fetch(`/api/drive/proxy/${fileId}`);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch image ${i + 1}: ${response.status}`);
+          }
+          imageBlob = await response.blob();
+        }
+
+        // Add to form data with proper naming convention
+        formData.append(`file_${i}`, imageBlob, carouselFile.name);
+      }
+
+      setTikTokResult('Subiendo carrusel a TikTok...', 'info');
+    } else if (contentType === 'image') {
+      // For single image
+      setTikTokResult(`Procesando “${file.name}” para TikTok...`, 'info');
+
+      const exportAsset = await buildExportBlobForCurrentSelection(file);
+      formData.append('file', exportAsset.blob, exportAsset.filename);
+    } else {
+      // For video (existing logic)
+      setTikTokResult(`Procesando “${file.name}” para TikTok...`, 'info');
+
+      const exportAsset = await buildExportBlobForCurrentSelection(file);
+      console.log(“[EXPORT] Blob created successfully:”, exportAsset.filename, “Size:”, exportAsset.blob.size);
+      formData.append('file', exportAsset.blob, exportAsset.filename);
+    }
 
     const response = await fetch('/api/tiktok/post', {
       method: 'POST',
@@ -1658,7 +1782,8 @@ async function publishToTikTok() {
 
     const publishId = result?.result?.publishId || 'sin publish id';
     const modeLabel = payload.postMode === 'DIRECT_POST' ? 'Direct post' : 'Inbox draft';
-    setTikTokResult(`${modeLabel} enviado a TikTok. Publish ID: ${publishId}`, 'success');
+    const contentLabel = contentType === 'carousel' ? 'Carrusel' : contentType === 'image' ? 'Imagen' : 'Video';
+    setTikTokResult(`${contentLabel} ${modeLabel} enviado a TikTok. Publish ID: ${publishId}`, 'success');
 
     if (state.isMobileMode) {
       switchMobilePanel('tiktok');
@@ -1720,6 +1845,106 @@ function applyTikTokQueryState() {
   url.searchParams.delete('tiktok');
   url.searchParams.delete('message');
   window.history.replaceState({}, '', url.toString());
+}
+
+function handleContentTypeChange() {
+  const contentType = elements.tiktokContentTypeInput.value;
+
+  // Show/hide carousel selector based on content type
+  if (contentType === 'carousel') {
+    elements.carouselSelector.style.display = 'block';
+    renderCarouselThumbnails();
+  } else {
+    elements.carouselSelector.style.display = 'none';
+    // Clear carousel selection when switching to other content types
+    clearCarouselSelection();
+  }
+
+  // Update publish button availability
+  syncTikTokPublishAvailability();
+}
+
+function renderCarouselThumbnails() {
+  if (state.carouselFiles.length === 0) {
+    elements.carouselThumbnails.innerHTML = `
+      <div class="carousel-placeholder">
+        Seleccioná 2-5 imágenes de la biblioteca para el carrusel
+      </div>
+    `;
+    return;
+  }
+
+  elements.carouselThumbnails.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+
+  for (const fileId of state.carouselFiles) {
+    const file = state.files.find(f => f.id === fileId);
+    if (!file || file.kind !== 'image') continue;
+
+    const thumb = document.createElement('div');
+    thumb.className = 'carousel-thumbnail';
+    thumb.innerHTML = `
+      <img src="/api/drive/thumbnail/${file.id}" alt="${escapeHtml(file.name)}" loading="lazy">
+      <button class="carousel-remove" data-file-id="${file.id}" title="Remover">×</button>
+      <span class="carousel-name">${escapeHtml(trimMiddle(file.name, 20))}</span>
+    `;
+
+    // Add remove button functionality
+    const removeBtn = thumb.querySelector('.carousel-remove');
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeFromCarousel(file.id);
+    });
+
+    fragment.appendChild(thumb);
+  }
+
+  elements.carouselThumbnails.appendChild(fragment);
+}
+
+function addToCarousel(fileId) {
+  const file = state.files.find(f => f.id === fileId);
+  if (!file || file.kind !== 'image') {
+    setStatus('Solo se pueden agregar imágenes al carrusel.', 'warn');
+    return;
+  }
+
+  if (state.carouselFiles.includes(fileId)) {
+    setStatus('Esta imagen ya está en el carrusel.', 'warn');
+    return;
+  }
+
+  if (state.carouselFiles.length >= 5) {
+    setStatus('Máximo 5 imágenes por carrusel.', 'warn');
+    return;
+  }
+
+  state.carouselFiles.push(fileId);
+  renderCarouselThumbnails();
+  setStatus(`"${file.name}" agregada al carrusel (${state.carouselFiles.length}/5).`, 'success');
+  syncTikTokPublishAvailability();
+}
+
+function removeFromCarousel(fileId) {
+  const index = state.carouselFiles.indexOf(fileId);
+  if (index > -1) {
+    const file = state.files.find(f => f.id === fileId);
+    state.carouselFiles.splice(index, 1);
+    renderCarouselThumbnails();
+    if (file) {
+      setStatus(`"${file.name}" removida del carrusel.`, 'info');
+    }
+    syncTikTokPublishAvailability();
+  }
+}
+
+function clearCarouselSelection() {
+  if (state.carouselFiles.length === 0) return;
+
+  state.carouselFiles = [];
+  renderCarouselThumbnails();
+  setStatus('Selección de carrusel limpiada.', 'info');
+  syncTikTokPublishAvailability();
 }
 
 async function runRoulette() {

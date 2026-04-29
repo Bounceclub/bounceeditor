@@ -915,3 +915,175 @@ input[type="range"]::-webkit-slider-thumb {
   font-size: 32px;
   opacity: 0.5;
 }
+
+/* Carousel Button in Library Cards */
+.card-carousel-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 10;
+  backdrop-filter: blur(4px);
+}
+
+.card-carousel-btn:hover {
+  background: rgba(255, 127, 50, 0.9);
+  transform: scale(1.1);
+}
+
+.card-carousel-btn.in-carousel {
+  background: rgba(93, 255, 186, 0.9);
+  color: #0a0a0a;
+}
+
+.card-carousel-btn.in-carousel:hover {
+  background: rgba(255, 105, 120, 0.9);
+  color: white;
+}
+
+/* Carousel Selector Styles */
+.carousel-selector {
+  margin-top: 20px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+.carousel-selector .field-label {
+  display: block;
+  margin-bottom: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.carousel-thumbnails {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 12px;
+  min-height: 120px;
+}
+
+.carousel-thumbnail {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid var(--border);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.carousel-thumbnail:hover {
+  border-color: var(--accent);
+  transform: scale(1.05);
+}
+
+.carousel-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.carousel-thumbnail .carousel-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 5;
+}
+
+.carousel-thumbnail:hover .carousel-remove {
+  opacity: 1;
+}
+
+.carousel-thumbnail .carousel-remove:hover {
+  background: rgba(255, 105, 120, 0.9);
+  transform: scale(1.1);
+}
+
+.carousel-name {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  font-size: 0.7rem;
+  padding: 4px 6px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  backdrop-filter: blur(4px);
+}
+
+.carousel-placeholder {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  border: 2px dashed var(--border);
+  color: var(--muted);
+  text-align: center;
+  font-size: 14px;
+}
+
+.carousel-add-btn {
+  grid-column: 1 / -1;
+  padding: 12px;
+  background: rgba(255, 127, 50, 0.1);
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  color: var(--accent);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.carousel-add-btn:hover {
+  background: rgba(255, 127, 50, 0.2);
+  border-color: var(--accent-2);
+}
+
+.carousel-count {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
