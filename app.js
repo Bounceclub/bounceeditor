@@ -111,25 +111,38 @@ const elements = {
 };
 
 window.addEventListener('load', () => {
+  console.log("[INIT] Page loaded, starting initialization");
   void initApp();
 });
 
 async function initApp() {
-  bindEvents();
-  applyResponsiveMode();
-  window.addEventListener('resize', applyResponsiveMode);
-  await hydrateConfig();
-  pollForGoogle();
-  await checkServerHealth();
-  syncOverlayControls();
-  renderAuthState();
-  renderSelectionState();
-  renderTikTokModeHint();
-  await loadTikTokStatus();
-  applyTikTokQueryState();
-  switchMobilePanel(state.mobilePanel, { scroll: false });
-  // Auto-load shared library — no user auth needed
-  void loadLibrary();
+  console.log("[INIT] initApp() called");
+  try {
+    bindEvents();
+    console.log("[INIT] Events bound");
+    applyResponsiveMode();
+    window.addEventListener('resize', applyResponsiveMode);
+    await hydrateConfig();
+    console.log("[INIT] Config hydrated");
+    pollForGoogle();
+    console.log("[INIT] Google polling started");
+    await checkServerHealth();
+    console.log("[INIT] Server health checked");
+    syncOverlayControls();
+    renderAuthState();
+    renderSelectionState();
+    renderTikTokModeHint();
+    await loadTikTokStatus();
+    console.log("[INIT] TikTok status loaded");
+    applyTikTokQueryState();
+    switchMobilePanel(state.mobilePanel, { scroll: false });
+    // Auto-load shared library — no user auth needed
+    void loadLibrary();
+    console.log("[INIT] Initialization complete");
+  } catch (error) {
+    console.error("[INIT] Initialization error:", error);
+    setStatus(`Error de inicialización: ${error.message}`, 'error');
+  }
 }
 
 function bindEvents() {
@@ -344,18 +357,23 @@ function maybeRefreshTokenClient() {
 }
 
 async function checkServerHealth() {
+  console.log("[HEALTH] Checking server health...");
   try {
     const response = await fetch('/api/health');
+    console.log("[HEALTH] Response received:", response.status, response.ok);
     if (!response.ok) {
       throw new Error('health-unavailable');
     }
 
     const payload = await response.json();
+    console.log("[HEALTH] Payload received:", payload);
     elements.rendererChip.textContent = payload.tiktokConfigured
       ? 'Servidor local: listo + TikTok configurado'
       : 'Servidor local: listo';
     elements.rendererChip.className = 'status-chip ok';
+    console.log("[HEALTH] Server health check completed successfully");
   } catch (error) {
+    console.error("[HEALTH] Server health check failed:", error);
     elements.rendererChip.textContent = 'Servidor local: sin respuesta';
     elements.rendererChip.className = 'status-chip error';
     setStatus('No pude hablar con el servidor local. Abrí la app con `python server.py`.', 'warn');
