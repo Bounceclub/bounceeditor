@@ -39,7 +39,7 @@ TIKTOK_DIRECT_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/video/init
 TIKTOK_UPLOAD_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/"
 TIKTOK_IMAGE_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/image/init/"
 TIKTOK_STATUS_URL = "https://open.tiktokapis.com/v2/post/publish/status/fetch/"
-TIKTOK_SCOPES = ["user.info.basic", "video.upload", "video.publish", "image.upload", "image.publish"]
+TIKTOK_SCOPES = ["user.info.basic", "video.upload", "video.publish"]
 PUBLIC_CONFIG_DEFAULTS = {
     "teamName": "Bounce",
     "googleClientId": "",
@@ -1663,6 +1663,13 @@ class BounceHandler(SimpleHTTPRequestHandler):
 
         state_token = secrets.token_urlsafe(24)
         auth_url = build_authorize_url(runtime, state_token)
+
+        # Log the full OAuth URL for debugging
+        print(f"[TIKTOK OAUTH] Full authorization URL: {auth_url}")
+        print(f"[TIKTOK OAUTH] Client key: {runtime['secretConfig']['tiktokClientKey']}")
+        print(f"[TIKTOK OAUTH] Scopes: {runtime['scopes']}")
+        print(f"[TIKTOK OAUTH] Redirect URI: {runtime['redirectUri']}")
+
         redirect(self, auth_url, cookies=[serialize_cookie("tiktok_oauth_state", state_token)])
 
     def handle_tiktok_callback(self, parsed):
