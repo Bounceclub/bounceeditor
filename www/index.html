@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Bounce Drive Media Studio</title>
+  <meta name="description" content="Biblioteca de Drive, editor rápido y publishing workflow para TikTok.">
+  <meta name="theme-color" content="#0d1016">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="app.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <div class="page-shell">
+    <header class="hero panel">
+      <div class="hero-copy">
+        <p class="eyebrow">Bounce Media Ops</p>
+        <h1>Drive Media Studio</h1>
+        <p class="hero-text">
+          Biblioteca compartida de eventos, edición express y salida pensada para TikTok.
+          La idea es que cualquiera del equipo pueda elegir un asset, ponerle texto y dejarlo listo desde el celu.
+        </p>
+      </div>
+      <div class="hero-side">
+        <div class="status-chip" id="rendererChip">Servidor local: comprobando</div>
+        <div class="hero-links">
+          <a href="terms.html" target="_blank" rel="noreferrer">Terms</a>
+          <a href="privacy.html" target="_blank" rel="noreferrer">Privacy</a>
+        </div>
+      </div>
+    </header>
+
+    <section class="panel config-panel" id="setupSection" data-mobile-panel="setup">
+      <div class="panel-title-row">
+        <div>
+          <p class="section-kicker">1. Setup</p>
+          <h2>Configuración compartida</h2>
+        </div>
+        <div class="auth-pill" id="authPill">Sin conectar</div>
+      </div>
+
+      <div class="setup-cards">
+        <article class="setup-card">
+          <strong>Drive</strong>
+          <p>Una sola carpeta raíz compartida para todo Bounce.</p>
+        </article>
+        <article class="setup-card">
+          <strong>Equipo</strong>
+          <p>La configuración se guarda en el servidor de la app, no solo en este navegador.</p>
+        </article>
+        <article class="setup-card">
+          <strong>TikTok</strong>
+          <p>La publicación directa queda lista para cuando tengas dominio HTTPS y credenciales.</p>
+        </article>
+      </div>
+
+      <div class="config-grid">
+        <label class="field">
+          <span>Nombre del equipo</span>
+          <input id="teamNameInput" type="text" placeholder="Bounce">
+        </label>
+
+        <label class="field">
+          <span>Google OAuth Client ID</span>
+          <input id="clientIdInput" type="text" placeholder="1234567890-abc123def456.apps.googleusercontent.com" autocomplete="off">
+        </label>
+
+        <label class="field">
+          <span>Carpeta de Drive</span>
+          <input id="folderInput" type="text" placeholder="Pegá la URL o el ID de la carpeta">
+        </label>
+
+        <label class="field config-span-2">
+          <span>Public Base URL</span>
+          <input id="publicBaseUrlInput" type="url" placeholder="https://studio.bounceclub.com">
+        </label>
+
+        <div class="field readonly-card">
+          <span>TikTok callback</span>
+          <div class="readonly-value" id="tiktokRedirectPreview">Se calcula automáticamente</div>
+        </div>
+      </div>
+
+      <div class="button-row">
+        <button id="saveConfigButton" class="button primary">Guardar config</button>
+        <button id="loadLibraryButton" class="button secondary">Recargar biblioteca</button>
+        <button id="connectButton" class="button ghost" style="display:none">Conectar Google Drive</button>
+        <button id="signOutButton" class="button ghost" style="display:none">Cerrar sesión</button>
+      </div>
+
+      <div class="callout soft">
+        <strong>TikTok:</strong> configurá las credenciales en Render para habilitar la publicación directa.
+      </div>
+
+      <p id="statusMessage" class="status-message">
+        La biblioteca se carga automáticamente al abrir la app.
+      </p>
+    </section>
+
+    <section class="stats-grid">
+      <article class="panel stat-card">
+        <span class="stat-label">Assets detectados</span>
+        <strong class="stat-value" id="statAssets">0</strong>
+      </article>
+      <article class="panel stat-card">
+        <span class="stat-label">Videos</span>
+        <strong class="stat-value" id="statVideos">0</strong>
+      </article>
+      <article class="panel stat-card">
+        <span class="stat-label">Imágenes</span>
+        <strong class="stat-value" id="statImages">0</strong>
+      </article>
+      <article class="panel stat-card">
+        <span class="stat-label">Subcarpetas</span>
+        <strong class="stat-value" id="statFolders">0</strong>
+      </article>
+    </section>
+
+    <main class="workspace" id="workspace">
+      <section class="panel library-panel" id="librarySection" data-mobile-panel="library">
+        <div class="panel-title-row tight">
+          <div>
+            <p class="section-kicker">2. Biblioteca</p>
+            <h2>Archivo Bounce</h2>
+          </div>
+          <div class="library-counter" id="libraryCounter">0 resultados</div>
+        </div>
+
+        <div class="toolbar">
+          <label class="toolbar-field search-field">
+            <span>Buscar</span>
+            <input id="searchInput" type="search" placeholder="Nombre, carpeta o tipo...">
+          </label>
+
+          <label class="toolbar-field">
+            <span>Tipo</span>
+            <select id="typeFilter">
+              <option value="all">Todo</option>
+              <option value="video">Videos</option>
+              <option value="image">Imágenes</option>
+            </select>
+          </label>
+
+          <label class="toolbar-field">
+            <span>Orden</span>
+            <select id="sortSelect">
+              <option value="newest">Más nuevos</option>
+              <option value="oldest">Más viejos</option>
+              <option value="name">Nombre A-Z</option>
+              <option value="duration">Duración</option>
+            </select>
+          </label>
+
+          <div class="toolbar-actions">
+            <button id="rouletteButton" class="button accent">Ruleta</button>
+            <button id="reloadLibraryButton" class="button ghost">Recargar</button>
+          </div>
+        </div>
+
+        <div id="pathBadge" class="path-badge">Sin carpeta cargada</div>
+        <div id="libraryGrid" class="library-grid empty-grid">
+          <div class="empty-card">
+            <strong>La biblioteca va a aparecer acá.</strong>
+            <p>Cuando cargues la carpeta de Drive vas a poder buscar, filtrar y elegir cualquier asset.</p>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel inspector-panel" id="editorSection" data-mobile-panel="editor">
+        <div class="panel-title-row tight">
+          <div>
+            <p class="section-kicker">3. Editor</p>
+            <h2>Preview + export</h2>
+          </div>
+          <div class="preview-badge" id="previewBadge">Sin selección</div>
+        </div>
+
+        <div class="preview-shell">
+          <div class="preview-stage" id="previewStage">
+            <div class="preview-placeholder" id="previewPlaceholder">
+              Elegí un archivo de la biblioteca para cargar el preview.
+            </div>
+            <img id="previewImage" class="preview-media" alt="Preview de imagen" hidden>
+            <video id="previewVideo" class="preview-media" controls playsinline preload="metadata" hidden style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;"></video>
+            <button id="playVideoButton" class="button ghost" hidden>▶ Reproducir</button>
+            <div class="overlay-preview" id="overlayPreview" hidden>
+              <span id="overlayPreviewText"></span>
+            </div>
+          </div>
+
+          <div class="preview-actions">
+            <button id="reloadPreviewButton" class="button ghost">Recargar preview</button>
+            <a id="openInDriveLink" class="button linkish disabled-link" href="#" target="_blank" rel="noreferrer">Abrir en Drive</a>
+          </div>
+        </div>
+
+        <div class="meta-card">
+          <div class="meta-line">
+            <span>Archivo</span>
+            <strong id="metaName">-</strong>
+          </div>
+          <div class="meta-line">
+            <span>Ruta</span>
+            <strong id="metaPath">-</strong>
+          </div>
+          <div class="meta-line">
+            <span>Tipo</span>
+            <strong id="metaType">-</strong>
+          </div>
+          <div class="meta-line">
+            <span>Dimensiones</span>
+            <strong id="metaDimensions">-</strong>
+          </div>
+          <div class="meta-line">
+            <span>Tamaño</span>
+            <strong id="metaSize">-</strong>
+          </div>
+          <div class="meta-line">
+            <span>Duración</span>
+            <strong id="metaDuration">-</strong>
+          </div>
+        </div>
+
+        <div class="editor-panel">
+          <div class="editor-heading">
+            <p class="section-kicker">4. Overlay</p>
+            <h3>Texto listo para vertical</h3>
+          </div>
+
+          <label class="field">
+            <span>Texto principal</span>
+            <textarea id="overlayTextInput" rows="3" placeholder="LA MEJOR FIESTA DE TRAP DE TODA LA ARGENTINA"></textarea>
+          </label>
+
+          <div class="slider-grid">
+            <label class="field slider-field">
+              <span>Tamaño <strong id="fontSizeValue">72</strong></span>
+              <input id="fontSizeInput" type="range" min="36" max="120" step="2" value="72">
+            </label>
+
+            <label class="field slider-field">
+              <span>Separación entre líneas <strong id="lineSpacingValue">16</strong></span>
+              <input id="lineSpacingInput" type="range" min="0" max="36" step="1" value="16">
+            </label>
+
+            <label class="field slider-field">
+              <span>Posición vertical <strong id="topOffsetValue">8%</strong></span>
+              <input id="topOffsetInput" type="range" min="2" max="28" step="1" value="8">
+            </label>
+
+            <label class="field slider-field">
+              <span>Ancho máximo del texto <strong id="maxWidthValue">76%</strong></span>
+              <input id="maxWidthInput" type="range" min="42" max="92" step="1" value="76">
+            </label>
+
+            <label class="field slider-field">
+              <span>Opacidad del box <strong id="boxOpacityValue">0.35</strong></span>
+              <input id="boxOpacityInput" type="range" min="0" max="0.75" step="0.05" value="0.35">
+            </label>
+          </div>
+
+          <div class="form-two">
+            <label class="field">
+              <span>Encuadre</span>
+              <select id="fitModeInput">
+                <option value="cover">Cover 9:16</option>
+                <option value="contain">Contain 9:16</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Salida</span>
+              <input value="1080 × 1920" disabled>
+            </label>
+          </div>
+
+          <div class="button-row editor-actions">
+            <button id="exportButton" class="button primary" disabled>Exportar</button>
+          </div>
+
+          <p class="inline-help">
+            El preview y la exportación corren en el navegador para que cualquiera del equipo pueda usarlo rápido.
+            Las imágenes salen en <strong>PNG</strong> y los videos en <strong>WEBM</strong>.
+          </p>
+        </div>
+      </aside>
+    </main>
+
+    <section class="panel tiktok-panel" id="tiktokSection" data-mobile-panel="tiktok">
+      <div class="panel-title-row">
+        <div>
+          <p class="section-kicker">5. TikTok</p>
+          <h2>Conectar y publicar</h2>
+        </div>
+        <div class="status-chip" id="tiktokStatusBadge">TikTok: sin configurar</div>
+      </div>
+
+      <div class="tiktok-grid">
+        <div class="tiktok-column">
+          <div class="account-card">
+            <div class="account-head">
+              <strong id="tiktokAccountLabel">Sin cuenta conectada</strong>
+              <span class="mini-badge" id="tiktokModeBadge">Video, Imagen y Carrusel</span>
+            </div>
+            <p id="tiktokChecklist" class="muted-block">
+              Configurá TikTok en <code>studio-secrets.json</code> y usá un dominio HTTPS para habilitar OAuth web.
+            </p>
+            <div class="button-row">
+              <button id="connectTikTokButton" class="button secondary">Conectar TikTok</button>
+              <button id="refreshTikTokButton" class="button ghost">Actualizar estado</button>
+              <button id="disconnectTikTokButton" class="button ghost">Desconectar</button>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>Tipo de contenido</span>
+            <select id="tiktokContentTypeInput">
+              <option value="video">Video</option>
+              <option value="image">Imagen</option>
+              <option value="carousel">Carrusel (2-5 imágenes)</option>
+            </select>
+          </label>
+
+          <div id="carouselSelector" class="carousel-selector" style="display: none;">
+            <span class="field-label">Seleccionar imágenes para carrusel (máximo 5):</span>
+            <div id="carouselThumbnails" class="carousel-thumbnails">
+              <div class="carousel-placeholder">
+                Seleccioná 2-5 imágenes de la biblioteca para el carrusel
+              </div>
+            </div>
+            <button id="clearCarouselButton" class="button ghost" style="margin-top: 10px;">Limpiar selección</button>
+          </div>
+
+          <label class="field">
+            <span>Caption / copy del post</span>
+            <textarea id="tiktokCaptionInput" rows="4" placeholder="Aftermovie Bounce. Noche sold out."></textarea>
+          </label>
+
+          <div class="form-two">
+            <label class="field">
+              <span>Hashtags</span>
+              <input id="tiktokHashtagsInput" type="text" placeholder="bounce trap buenosaires">
+            </label>
+
+            <label class="field">
+              <span>Menciones</span>
+              <input id="tiktokMentionsInput" type="text" placeholder="@bounce @invitado">
+            </label>
+          </div>
+
+          <div class="form-two">
+            <label class="field">
+              <span>Modo</span>
+              <select id="tiktokPostModeInput">
+                <option value="DIRECT_POST">Direct post</option>
+                <option value="UPLOAD_TO_INBOX">Inbox draft</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Privacidad</span>
+              <select id="tiktokPrivacyInput">
+                <option value="">Elegí privacidad</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="field">
+            <span>Frame de portada (segundos)</span>
+            <input id="tiktokCoverTimestampInput" type="number" min="0" step="0.5" value="0">
+          </label>
+        </div>
+
+        <div class="tiktok-column">
+          <div class="toggle-grid">
+            <label class="toggle-card">
+              <input id="allowCommentCheckbox" type="checkbox">
+              <span>Permitir comentarios</span>
+            </label>
+            <label class="toggle-card">
+              <input id="allowDuetCheckbox" type="checkbox">
+              <span>Permitir duet</span>
+            </label>
+            <label class="toggle-card">
+              <input id="allowStitchCheckbox" type="checkbox">
+              <span>Permitir stitch</span>
+            </label>
+            <label class="toggle-card">
+              <input id="brandOrganicCheckbox" type="checkbox">
+              <span>Promociona negocio propio</span>
+            </label>
+            <label class="toggle-card">
+              <input id="brandContentCheckbox" type="checkbox">
+              <span>Paid partnership</span>
+            </label>
+            <label class="toggle-card consent-card">
+              <input id="musicConsentCheckbox" type="checkbox">
+              <span>Confirmo “Music Usage Confirmation” de TikTok</span>
+            </label>
+          </div>
+
+          <div class="callout">
+            <strong>Ojo:</strong> desde esta web la integración de TikTok está enfocada en <em>video</em>. Para fotos/carruseles,
+            TikTok pide URLs verificadas por dominio.
+          </div>
+
+          <div class="callout soft" id="tiktokModeHint">
+            En <strong>Direct post</strong>, el caption, hashtags y privacidad sí viajan desde esta web. En
+            <strong>Inbox draft</strong>, TikTok te manda el video al inbox para terminarlo desde la app.
+          </div>
+
+          <div class="button-row">
+            <button id="publishTikTokButton" class="button primary" disabled>Subir a TikTok</button>
+          </div>
+
+          <p id="tiktokPublishResult" class="status-message info">
+            Conectá la cuenta, elegí un video y completá los campos para publicar.
+          </p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <nav class="mobile-nav" id="mobileNav" aria-label="Secciones móviles">
+    <button data-mobile-target="setup" class="active">Setup</button>
+    <button data-mobile-target="library">Biblioteca</button>
+    <button data-mobile-target="editor">Editor</button>
+    <button data-mobile-target="tiktok">TikTok</button>
+  </nav>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

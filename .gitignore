@@ -53,3 +53,14 @@ test_*.py
 # Archivos generados
 bounce_app_icon.png
 create_app_icon.py
+
+# Capacitor / Android
+android/.gradle/
+android/app/build/
+android/local.properties
+android/.idea/
+android/captures/
+android/gradlew
+android/gradlew.bat
+node_modules/
+package-lock.json

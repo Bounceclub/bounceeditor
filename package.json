@@ -1,0 +1,25 @@
+{
+  "name": "bounceeditor",
+  "version": "1.0.0",
+  "description": "App interna para Bounce pensada para equipo: toma una carpeta compartida de Google Drive como biblioteca, deja elegir assets rápido desde web o celular, permite poner texto arriba y prepara la salida para TikTok.",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android",
+    "cap:build": "cd android && ./gradlew assembleDebug",
+    "cap:install": "cd android && ./gradlew installDebug"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Bounceclub/bounceeditor.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Bounceclub/bounceeditor/issues"
+  },
+  "homepage": "https://github.com/Bounceclub/bounceeditor#readme"
+}

@@ -1,0 +1,13 @@
+{
+  "appId": "com.bounce.editor",
+  "appName": "BounceEditor",
+  "webDir": "www",
+  "server": {
+    "url": "https://bounceeditor.onrender.com",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true
+  }
+}
