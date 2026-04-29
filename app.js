@@ -1748,7 +1748,7 @@ async function publishToTikTok() {
   }
 
   if (!elements.musicConsentCheckbox.checked) {
-    setTikTokResult('TikTok exige confirmar “Music Usage Confirmation” antes de publicar.', 'warn');
+    setTikTokResult('TikTok exige confirmar "Music Usage Confirmation" antes de publicar.', 'warn');
     return;
   }
 
@@ -1804,16 +1804,16 @@ async function publishToTikTok() {
       setTikTokResult('Subiendo carrusel a TikTok...', 'info');
     } else if (contentType === 'image') {
       // For single image
-      setTikTokResult(`Procesando “${file.name}” para TikTok...`, 'info');
+      setTikTokResult(`Procesando "${file.name}" para TikTok...`, 'info');
 
       const exportAsset = await buildExportBlobForCurrentSelection(file);
       formData.append('file', exportAsset.blob, exportAsset.filename);
     } else {
       // For video (existing logic)
-      setTikTokResult(`Procesando “${file.name}” para TikTok...`, 'info');
+      setTikTokResult(`Procesando "${file.name}" para TikTok...`, 'info');
 
       const exportAsset = await buildExportBlobForCurrentSelection(file);
-      console.log(“[EXPORT] Blob created successfully:”, exportAsset.filename, “Size:”, exportAsset.blob.size);
+      console.log("[EXPORT] Blob created successfully:", exportAsset.filename, "Size:", exportAsset.blob.size);
       formData.append('file', exportAsset.blob, exportAsset.filename);
     }
 
