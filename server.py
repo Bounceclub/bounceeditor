@@ -1076,6 +1076,15 @@ class BounceHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
 
+        if parsed.path == '/tiktokx4L5xZ76S1ZzjnUOyic3ZpIXKRYnmhlS.txt':
+            content = b'tiktok-developers-site-verification=x4L5xZ76S1ZzjnUOyic3ZpIXKRYnmhlS'
+            self.send_response(HTTPStatus.OK)
+            self.send_header('Content-Type', 'text/plain')
+            self.send_header('Content-Length', str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+            return
+
         if parsed.path == "/api/health":
             runtime = get_tiktok_runtime(self)
             write_json_response(
