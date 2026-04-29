@@ -838,9 +838,24 @@ async function loadPreview(file, { force = false } = {}) {
 }
 
 async function fetchDriveBlob(file) {
+  console.log("[FETCH] Starting fetch for:", file.name, "ID:", file.id);
   const response = await fetch(`/api/drive/proxy/${file.id}`);
-  if (!response.ok) throw new Error(`drive-preview-${response.status}`);
-  return response.blob();
+  console.log("[FETCH] Response status:", response.status, "ok:", response.ok);
+
+  if (!response.ok) {
+    // Try to get error details
+    try {
+      const errorData = await response.json();
+      console.error("[FETCH] Error details:", errorData);
+      throw new Error(errorData?.error || `drive-preview-${response.status}`);
+    } catch (e) {
+      throw new Error(`drive-preview-${response.status}`);
+    }
+  }
+
+  const blob = await response.blob();
+  console.log("[FETCH] Blob received, size:", blob.size, "type:", blob.type);
+  return blob;
 }
 
 function showPreview(file, previewToken) {
@@ -851,6 +866,19 @@ function showPreview(file, previewToken) {
     elements.previewVideo.pause();
     elements.previewVideo.hidden = true;
     elements.previewVideo.removeAttribute('src');
+
+    // Add error handler for image loading
+    elements.previewImage.onerror = function() {
+      console.error("[PREVIEW] Image failed to load");
+      elements.previewPlaceholder.hidden = false;
+      elements.previewPlaceholder.textContent = 'No se pudo cargar la imagen.';
+      setStatus('No se pudo cargar la imagen.', 'error');
+    };
+
+    elements.previewImage.onload = function() {
+      console.log("[PREVIEW] Image loaded successfully");
+    };
+
     elements.previewImage.src = state.currentPreviewUrl;
     elements.previewImage.hidden = false;
     console.log("[PREVIEW] Image preview set, hidden:", elements.previewImage.hidden);
